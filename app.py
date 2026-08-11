@@ -46,8 +46,10 @@ def ask():
     global _last_answer_time
 
     data = request.get_json(force=True, silent=True) or {}
-    username = str(data.get("username", "")).strip()
-    message = str(data.get("message", "")).strip()
+
+    # Aceita tanto o formato do TikFinity (value1/value2) quanto o nosso formato de teste (username/message)
+    username = str(data.get("value1", data.get("username", ""))).strip()
+    message = str(data.get("value2", data.get("message", ""))).strip()
 
     if len(message) < MIN_MESSAGE_LENGTH:
         return jsonify({"skipped": True, "reason": "message_too_short"}), 200
