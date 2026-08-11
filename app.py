@@ -54,7 +54,8 @@ def gerar_audio(texto: str, caminho_saida: str, voice: str = None, pitch: str = 
     asyncio.run(_run())
 
 
-def gerar_resposta_e_falar(system_prompt: str, prompt_usuario: str, prefixo_arquivo: str = "resposta"):
+def gerar_resposta_e_falar(system_prompt: str, prompt_usuario: str, prefixo_arquivo: str = "resposta",
+                            voice: str = None, pitch: str = "+0Hz", rate: str = "+0%"):
     completion = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
@@ -68,7 +69,7 @@ def gerar_resposta_e_falar(system_prompt: str, prompt_usuario: str, prefixo_arqu
 
     nome_arquivo = f"{prefixo_arquivo}_{int(time.time() * 1000)}.mp3"
     caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
-    gerar_audio(resposta_texto, caminho_completo)
+    gerar_audio(resposta_texto, caminho_completo, voice=voice, pitch=pitch, rate=rate)
 
     _latest["filename"] = nome_arquivo
     _latest["text"] = resposta_texto
@@ -111,28 +112,55 @@ def ask():
 
     try:
         prompt_usuario = message if not username else f"{username} perguntou: {message}"
-
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt_usuario},
-            ],
-            max_tokens=150,
-            temperature=0.8,
-        )
-        resposta_texto = completion.choices[0].message.content.strip()
-
-        nome_arquivo = f"resposta_{int(time.time() * 1000)}.mp3"
-        caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
-        gerar_audio(resposta_texto, caminho_completo)
+        resposta_texto, nome_arquivo = gerar_resposta_e_falar(SYSTEM_PROMPT, prompt_usuario, prefixo_arquivo="resposta")
 
         base_url = request.host_url.rstrip("/")
         audio_url = f"{base_url}/static/audio/{nome_arquivo}"
 
-        _latest["filename"] = nome_arquivo
-        _latest["text"] = resposta_texto
-        _latest["id"] += 1
+        return jsonify({
+            "skipped": False,
+            "text": resposta_texto,
+            "audio_url": audio_url,
+            "filename": nome_arquivo,
+        })
+
+    except Exception as e:
+        return jsonify({"skipped": True, "reason": "error", "detail": str(e)}), 500
+
+
+@app.route("/gift", methods=["POST"])
+def gift():
+    global _last_gift_time
+
+    data = request.get_json(force=True, silent=True) or {}
+
+    # value1 = username, value3 = nome do presente (SKU), conforme o webhook do TikFinity
+    username = str(data.get("value1", data.get("username", "alguém"))).strip() or "alguém"
+    gift_name = str(data.get("value3", data.get("gift", ""))).strip()
+
+    with _lock:
+        now = time.time()
+        if now - _last_gift_time < MIN_SECONDS_BETWEEN_GIFTS:
+            return jsonify({"skipped": True, "reason": "rate_limited"}), 200
+        _last_gift_time = now
+
+    try:
+        if gift_name:
+            prompt_usuario = f"{username} acabou de mandar o presente '{gift_name}'."
+        else:
+            prompt_usuario = f"{username} acabou de mandar um presente."
+
+        resposta_texto, nome_arquivo = gerar_resposta_e_falar(
+            GIFT_SYSTEM_PROMPT,
+            prompt_usuario,
+            prefixo_arquivo="presente",
+            voice="pt-BR-FranciscaNeural",
+            pitch="+55Hz",
+            rate="+10%",
+        )
+
+        base_url = request.host_url.rstrip("/")
+        audio_url = f"{base_url}/static/audio/{nome_arquivo}"
 
         return jsonify({
             "skipped": False,
