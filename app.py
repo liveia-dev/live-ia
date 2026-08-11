@@ -54,6 +54,19 @@ def ask():
     if len(message) < MIN_MESSAGE_LENGTH:
         return jsonify({"skipped": True, "reason": "message_too_short"}), 200
 
+    mensagem_lower = message.lower().strip()
+    parece_pergunta = "?" in message
+    usou_comando = mensagem_lower.startswith("!pergunta")
+
+    if not (parece_pergunta or usou_comando):
+        return jsonify({"skipped": True, "reason": "not_a_question"}), 200
+
+    if usou_comando:
+        # remove o "!pergunta" do começo, deixando só o texto da dúvida
+        message = message[len("!pergunta"):].strip(" :,-")
+        if len(message) < MIN_MESSAGE_LENGTH:
+            return jsonify({"skipped": True, "reason": "message_too_short"}), 200
+
     with _lock:
         now = time.time()
         if now - _last_answer_time < MIN_SECONDS_BETWEEN_ANSWERS:
