@@ -26,6 +26,17 @@ SYSTEM_PROMPT = (
     "Fale como se estivesse conversando de verdade com a pessoa, sem enrolação."
 )
 
+GIFT_SYSTEM_PROMPT = (
+    "Você é o assistente de voz de uma live de bate-papo descontraída no TikTok. "
+    "Alguém acabou de te mandar um presente virtual durante a live. "
+    "Agradeça de forma curta (1 frase, no máximo 2), animada e criativa, mencionando o nome da "
+    "pessoa e, se fizer sentido, o nome do presente. Varie as frases, não repita sempre o mesmo agradecimento. "
+    "Nunca use palavrão, conteúdo sexual, ofensivo ou pesado. Fale em português do Brasil."
+)
+
+MIN_SECONDS_BETWEEN_GIFTS = float(os.environ.get("MIN_SECONDS_BETWEEN_GIFTS", "5"))
+_last_gift_time = 0.0
+
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), "static", "audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
@@ -34,11 +45,36 @@ _lock = threading.Lock()
 _latest = {"filename": None, "text": None, "id": 0}
 
 
-def gerar_audio(texto: str, caminho_saida: str):
+def gerar_audio(texto: str, caminho_saida: str, voice: str = None, pitch: str = "+0Hz", rate: str = "+0%"):
+    voice = voice or VOICE_NAME
+
     async def _run():
-        communicate = edge_tts.Communicate(texto, VOICE_NAME)
+        communicate = edge_tts.Communicate(texto, voice, pitch=pitch, rate=rate)
         await communicate.save(caminho_saida)
     asyncio.run(_run())
+
+
+def gerar_resposta_e_falar(system_prompt: str, prompt_usuario: str, prefixo_arquivo: str = "resposta"):
+    completion = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt_usuario},
+        ],
+        max_tokens=150,
+        temperature=0.8,
+    )
+    resposta_texto = completion.choices[0].message.content.strip()
+
+    nome_arquivo = f"{prefixo_arquivo}_{int(time.time() * 1000)}.mp3"
+    caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
+    gerar_audio(resposta_texto, caminho_completo)
+
+    _latest["filename"] = nome_arquivo
+    _latest["text"] = resposta_texto
+    _latest["id"] += 1
+
+    return resposta_texto, nome_arquivo
 
 
 @app.route("/ask", methods=["POST"])
@@ -107,6 +143,38 @@ def ask():
 
     except Exception as e:
         return jsonify({"skipped": True, "reason": "error", "detail": str(e)}), 500
+
+
+@app.route("/sample-gift-voice")
+def sample_gift_voice():
+    style = request.args.get("style", "esquilo")
+
+    frase = "Aiii, muito obrigada pelo presente, você é incrível!"
+
+    estilos = {
+        "esquilo": {"voice": "pt-BR-AntonioNeural", "pitch": "+35Hz", "rate": "+25%"},
+        "dramatico": {"voice": "pt-BR-AntonioNeural", "pitch": "-15Hz", "rate": "-15%"},
+        "normal": {"voice": "pt-BR-AntonioNeural", "pitch": "+0Hz", "rate": "+0%"},
+    }
+
+    config = estilos.get(style, estilos["esquilo"])
+
+    nome_arquivo = f"amostra_{style}_{int(time.time() * 1000)}.mp3"
+    caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
+    gerar_audio(frase, caminho_completo, voice=config["voice"], pitch=config["pitch"], rate=config["rate"])
+
+    base_url = request.host_url.rstrip("/")
+    audio_url = f"{base_url}/static/audio/{nome_arquivo}"
+
+    return f"""
+    <html><body style="font-family:sans-serif; text-align:center; margin-top:50px;">
+        <h2>Amostra: {style}</h2>
+        <audio controls autoplay src="{audio_url}"></audio>
+        <p><a href="/sample-gift-voice?style=esquilo">Esquilo</a> |
+           <a href="/sample-gift-voice?style=dramatico">Dramático</a> |
+           <a href="/sample-gift-voice?style=normal">Normal</a></p>
+    </body></html>
+    """
 
 
 @app.route("/latest")
