@@ -155,6 +155,8 @@ def sample_gift_voice():
         "esquilo": {"voice": "pt-BR-AntonioNeural", "pitch": "+35Hz", "rate": "+25%"},
         "dramatico": {"voice": "pt-BR-AntonioNeural", "pitch": "-15Hz", "rate": "-15%"},
         "normal": {"voice": "pt-BR-AntonioNeural", "pitch": "+0Hz", "rate": "+0%"},
+        "robo": {"voice": "pt-BR-AntonioNeural", "pitch": "-40Hz", "rate": "-30%"},
+        "gringo": {"voice": "en-US-GuyNeural", "pitch": "+0Hz", "rate": "+0%"},
     }
 
     config = estilos.get(style, estilos["esquilo"])
@@ -172,7 +174,9 @@ def sample_gift_voice():
         <audio controls autoplay src="{audio_url}"></audio>
         <p><a href="/sample-gift-voice?style=esquilo">Esquilo</a> |
            <a href="/sample-gift-voice?style=dramatico">Dramático</a> |
-           <a href="/sample-gift-voice?style=normal">Normal</a></p>
+           <a href="/sample-gift-voice?style=normal">Normal</a> |
+           <a href="/sample-gift-voice?style=robo">Robô</a> |
+           <a href="/sample-gift-voice?style=gringo">Gringo</a></p>
     </body></html>
     """
 
