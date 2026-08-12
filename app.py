@@ -17,6 +17,20 @@ VOICE_NAME = os.environ.get("VOICE_NAME", "pt-BR-AntonioNeural")  # troque para 
 MIN_SECONDS_BETWEEN_ANSWERS = float(os.environ.get("MIN_SECONDS_BETWEEN_ANSWERS", "8"))
 MIN_MESSAGE_LENGTH = int(os.environ.get("MIN_MESSAGE_LENGTH", "4"))
 
+# Expressões que costumam indicar um pedido de explicação/dúvida, mesmo sem "?"
+# (ex: "me ensina o que é PNL", "explica como funciona isso", "não entendi essa parte")
+PALAVRAS_DE_PERGUNTA = [
+    "o que é", "o que e", "o que seria", "o que significa",
+    "como funciona", "como faz", "como fazer", "como se faz",
+    "por que", "porque", "pra que serve", "para que serve",
+    "qual é", "qual e", "quais são", "quais sao", "quem foi", "quem é", "quem e",
+    "me explica", "me explique", "explica pra mim", "explique pra mim",
+    "me ensina", "me ensine", "ensina pra mim",
+    "me diz", "me diga", "me conta", "conta pra mim", "fala sobre", "fale sobre",
+    "não entendi", "nao entendi", "não entendo", "nao entendo",
+    "me fala", "me fale",
+]
+
 client = Groq(api_key=GROQ_API_KEY)
 
 SYSTEM_PROMPT = (
@@ -140,8 +154,9 @@ def ask():
     mensagem_lower = message.lower().strip()
     parece_pergunta = "?" in message
     usou_comando = mensagem_lower.startswith("!pergunta")
+    parece_pedido_explicacao = any(expressao in mensagem_lower for expressao in PALAVRAS_DE_PERGUNTA)
 
-    if not (parece_pergunta or usou_comando):
+    if not (parece_pergunta or usou_comando or parece_pedido_explicacao):
         return jsonify({"skipped": True, "reason": "not_a_question"}), 200
 
     if usou_comando:
