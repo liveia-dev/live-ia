@@ -16,7 +16,14 @@
 <p>Abra o player em outra aba antes de testar: <a href="https://live-ia.onrender.com/player" target="_blank">abrir player</a></p>
 
 <button onclick="perguntar()">❓ Fazer uma pergunta de teste</button>
-<button onclick="mandarPresente()">🎁 Mandar 1 presente (Rosa)</button>
+
+<div style="border:1px solid #ccc; border-radius:8px; padding:12px; margin:12px 0;">
+  <label>Nome do presente pra testar:</label>
+  <input id="nomePresente" type="text" value="Rosa" style="width:100%; padding:8px; margin:8px 0; box-sizing:border-box;">
+  <button onclick="mandarPresente()">🎁 Mandar esse presente</button>
+  <p style="font-size:12px; color:#666;">Exemplos prontos pra testar os 3 níveis: <b>Rosa</b> (barato) · <b>Panda</b> (médio) · <b>Leão</b> (caro, usa IA mesmo em modo NPC)</p>
+</div>
+
 <button onclick="mandarVariosPresentes()">🎁🎁🎁 Mandar 10 rosas rápido (combo)</button>
 
 <div id="log">Aguardando...</div>
@@ -45,12 +52,13 @@
   }
 
   async function mandarPresente() {
-    log("Enviando 1 presente...");
+    const nome = document.getElementById('nomePresente').value.trim() || "Rosa";
+    log("Enviando presente: " + nome + "...");
     try {
       const res = await fetch(SERVIDOR + "/gift", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value1: "testeuser", value3: "Rosa" })
+        body: JSON.stringify({ value1: "testeuser", value3: nome })
       });
       const data = await res.json();
       log("Resposta: " + JSON.stringify(data));
