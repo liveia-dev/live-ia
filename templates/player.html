@@ -33,6 +33,8 @@
     const botaoAtivar = document.getElementById('ativar');
     let tocandoAgora = false;
 
+    let inicioTocando = null;
+
     async function tocarProximo() {
       if (tocandoAgora) return;
 
@@ -43,6 +45,7 @@
         if (data.empty) return;
 
         tocandoAgora = true;
+        inicioTocando = Date.now();
         audioEl.src = '/static/audio/' + data.filename;
         textoEl.textContent = data.text || '';
         audioEl.play().catch(() => {
@@ -65,8 +68,20 @@
       tocarProximo();
     });
 
-    // checa a fila periodicamente, caso não tenha nada tocando no momento
-    setInterval(tocarProximo, 1000);
+    audioEl.addEventListener('error', () => {
+      // se um áudio falhar ao carregar/tocar, não trava a fila: pula pro próximo
+      tocandoAgora = false;
+      tocarProximo();
+    });
+
+    // trava de segurança: se travar tocando por mais de 15s sem terminar, libera de novo
+    // e também checa a fila periodicamente, caso não tenha nada tocando no momento
+    setInterval(() => {
+      if (tocandoAgora && inicioTocando && (Date.now() - inicioTocando > 15000)) {
+        tocandoAgora = false;
+      }
+      tocarProximo();
+    }, 1000);
   </script>
 </body>
 </html>
