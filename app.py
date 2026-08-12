@@ -81,13 +81,36 @@ GIFT_TIERS = {
     "galáxia": "caro", "galaxia": "caro", "galaxy": "caro",
 }
 
+# NOVO: mapeia cada tier de presente pro nome do clipe de vídeo do avatar
+# que deve ser exibido no player.html enquanto a fala toca.
+# Os nomes aqui devem bater exatamente com os arquivos de vídeo em static/video/
+TIER_TO_AVATAR_CLIP = {
+    "barato": "avatar_presente_barato",
+    "medio": "avatar_presente_medio",
+    "caro": "avatar_presente_caro",
+}
+
+# Clipe usado quando o avatar está respondendo uma pergunta do chat
+AVATAR_CLIP_PERGUNTA = "avatar_pergunta"
+
+# Clipe padrão de descanso (looping) — o player volta pra ele sozinho
+# assim que o áudio da fala termina de tocar
+AVATAR_CLIP_IDLE = "avatar_idle"
+
 
 def classificar_presente(gift_name: str) -> str:
     chave = gift_name.strip().lower()
     return GIFT_TIERS.get(chave, "barato")
 
+
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), "static", "audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
+
+# NOVO: pasta onde ficam os vídeos do avatar (idle, pergunta, presente_barato,
+# presente_medio, presente_caro, transicao). Coloque os arquivos .mp4 aqui,
+# com esses nomes exatos (ex: avatar_idle.mp4, avatar_pergunta.mp4...).
+VIDEO_DIR = os.path.join(os.path.dirname(__file__), "static", "video")
+os.makedirs(VIDEO_DIR, exist_ok=True)
 
 _last_answer_time = 0.0
 _lock = threading.Lock()
@@ -97,13 +120,18 @@ _next_id = 0
 MAX_QUEUE_SIZE = int(os.environ.get("MAX_QUEUE_SIZE", "20"))
 
 
-def enfileirar(texto: str, nome_arquivo: str):
+def enfileirar(texto: str, nome_arquivo: str, avatar_clip: str = AVATAR_CLIP_IDLE):
     global _next_id
     with _queue_lock:
         if len(_queue) >= MAX_QUEUE_SIZE:
             return False  # fila cheia, ignora pra não deixar a live num monólogo infinito
         _next_id += 1
-        _queue.append({"id": _next_id, "text": texto, "filename": nome_arquivo})
+        _queue.append({
+            "id": _next_id,
+            "text": texto,
+            "filename": nome_arquivo,
+            "avatar_clip": avatar_clip,  # NOVO: diz ao player.html qual vídeo mostrar
+        })
         return True
 
 
@@ -117,7 +145,8 @@ def gerar_audio(texto: str, caminho_saida: str, voice: str = None, pitch: str = 
 
 
 def gerar_resposta_e_falar(system_prompt: str, prompt_usuario: str, prefixo_arquivo: str = "resposta",
-                            voice: str = None, pitch: str = "+0Hz", rate: str = "+0%"):
+                            voice: str = None, pitch: str = "+0Hz", rate: str = "+0%",
+                            avatar_clip: str = AVATAR_CLIP_IDLE):
     completion = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
@@ -133,7 +162,7 @@ def gerar_resposta_e_falar(system_prompt: str, prompt_usuario: str, prefixo_arqu
     caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
     gerar_audio(resposta_texto, caminho_completo, voice=voice, pitch=pitch, rate=rate)
 
-    enfileirar(resposta_texto, nome_arquivo)
+    enfileirar(resposta_texto, nome_arquivo, avatar_clip=avatar_clip)
 
     return resposta_texto, nome_arquivo
 
@@ -173,7 +202,10 @@ def ask():
 
     try:
         prompt_usuario = message if not username else f"{username} perguntou: {message}"
-        resposta_texto, nome_arquivo = gerar_resposta_e_falar(SYSTEM_PROMPT, prompt_usuario, prefixo_arquivo="resposta")
+        resposta_texto, nome_arquivo = gerar_resposta_e_falar(
+            SYSTEM_PROMPT, prompt_usuario, prefixo_arquivo="resposta",
+            avatar_clip=AVATAR_CLIP_PERGUNTA,  # NOVO
+        )
 
         base_url = request.host_url.rstrip("/")
         audio_url = f"{base_url}/static/audio/{nome_arquivo}"
@@ -183,6 +215,7 @@ def ask():
             "text": resposta_texto,
             "audio_url": audio_url,
             "filename": nome_arquivo,
+            "avatar_clip": AVATAR_CLIP_PERGUNTA,  # NOVO
         })
 
     except Exception as e:
@@ -200,6 +233,7 @@ def gift():
     gift_name = str(data.get("value3", data.get("gift", ""))).strip() or "um presente"
 
     tier = classificar_presente(gift_name)
+    avatar_clip = TIER_TO_AVATAR_CLIP.get(tier, TIER_TO_AVATAR_CLIP["barato"])  # NOVO
     vai_usar_ia = (GIFT_MODE != "npc") or (tier == "caro")
 
     # Presentes caros (que usam IA) respeitam o cooldown mais longo, mesmo em modo NPC.
@@ -230,7 +264,7 @@ def gift():
                 pitch="+55Hz",
                 rate="+10%",
             )
-            colocou_na_fila = enfileirar(resposta_texto, nome_arquivo)
+            colocou_na_fila = enfileirar(resposta_texto, nome_arquivo, avatar_clip=avatar_clip)  # NOVO
             if not colocou_na_fila:
                 return jsonify({"skipped": True, "reason": "queue_full"}), 200
 
@@ -252,6 +286,7 @@ def gift():
                 voice="pt-BR-FranciscaNeural",
                 pitch="+55Hz",
                 rate="+10%",
+                avatar_clip=avatar_clip,  # NOVO
             )
 
         base_url = request.host_url.rstrip("/")
@@ -263,6 +298,8 @@ def gift():
             "text": resposta_texto,
             "audio_url": audio_url,
             "filename": nome_arquivo,
+            "tier": tier,  # NOVO — útil pra debug/teste
+            "avatar_clip": avatar_clip,  # NOVO
         })
 
     except Exception as e:
@@ -321,6 +358,12 @@ def serve_audio(filename):
     return send_from_directory(AUDIO_DIR, filename)
 
 
+# NOVO: rota pra servir os vídeos do avatar (idle, pergunta, presentes, transição)
+@app.route("/static/video/<path:filename>")
+def serve_video(filename):
+    return send_from_directory(VIDEO_DIR, filename)
+
+
 @app.route("/teste.html")
 def pagina_teste():
     return send_from_directory(os.path.dirname(__file__), "teste.html")
@@ -339,3 +382,4 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+    
