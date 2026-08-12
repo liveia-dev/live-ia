@@ -25,6 +25,24 @@ MIN_MESSAGE_LENGTH = int(os.environ.get("MIN_MESSAGE_LENGTH", "4"))
 PITCH_PRINCIPAL = os.environ.get("PITCH_PRINCIPAL", "-10Hz")
 RATE_PRINCIPAL = os.environ.get("RATE_PRINCIPAL", "-8%")
 
+# Vozes de presente: fininha/acelerada pros baratos e médios (como já era),
+# e GRAVE só pro presente CARO — a virada de chave que cria o efeito cômico
+# de contraste (avatar fofa soltando timbre grosso do nada).
+VOICE_PRESENTE_FININHA = os.environ.get("VOICE_PRESENTE_FININHA", "pt-BR-FranciscaNeural")
+PITCH_PRESENTE_FININHA = os.environ.get("PITCH_PRESENTE_FININHA", "+55Hz")
+RATE_PRESENTE_FININHA = os.environ.get("RATE_PRESENTE_FININHA", "+10%")
+
+VOICE_PRESENTE_GRAVE = os.environ.get("VOICE_PRESENTE_GRAVE", "pt-BR-AntonioNeural")
+PITCH_PRESENTE_GRAVE = os.environ.get("PITCH_PRESENTE_GRAVE", "-35Hz")
+RATE_PRESENTE_GRAVE = os.environ.get("RATE_PRESENTE_GRAVE", "-15%")
+
+
+def voz_para_presente(tier: str):
+    """Escalada: normal (pergunta) -> fininha (barato/médio) -> GRAVE (caro)."""
+    if tier == "caro":
+        return VOICE_PRESENTE_GRAVE, PITCH_PRESENTE_GRAVE, RATE_PRESENTE_GRAVE
+    return VOICE_PRESENTE_FININHA, PITCH_PRESENTE_FININHA, RATE_PRESENTE_FININHA
+
 # Expressões que costumam indicar um pedido de explicação/dúvida, mesmo sem "?"
 # (ex: "me ensina o que é PNL", "explica como funciona isso", "não entendi essa parte")
 PALAVRAS_DE_PERGUNTA = [
@@ -312,12 +330,13 @@ def gift():
 
             nome_arquivo = f"presente_{int(time.time() * 1000)}.mp3"
             caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
+            voz, pitch_presente, rate_presente = voz_para_presente(tier)  # NOVO: escalada fina->grave
             gerar_audio(
                 resposta_texto,
                 caminho_completo,
-                voice="pt-BR-FranciscaNeural",
-                pitch="+55Hz",
-                rate="+10%",
+                voice=voz,
+                pitch=pitch_presente,
+                rate=rate_presente,
             )
             colocou_na_fila = enfileirar(resposta_texto, nome_arquivo, avatar_clip=avatar_clip)  # NOVO
             if not colocou_na_fila:
@@ -334,13 +353,14 @@ def gift():
             else:
                 prompt_usuario = f"{username} acabou de mandar o presente '{gift_name}'."
 
+            voz, pitch_presente, rate_presente = voz_para_presente(tier)  # NOVO: escalada fina->grave
             resposta_texto, nome_arquivo = gerar_resposta_e_falar(
                 GIFT_SYSTEM_PROMPT,
                 prompt_usuario,
                 prefixo_arquivo="presente",
-                voice="pt-BR-FranciscaNeural",
-                pitch="+55Hz",
-                rate="+10%",
+                voice=voz,
+                pitch=pitch_presente,
+                rate=rate_presente,
                 avatar_clip=avatar_clip,  # NOVO
             )
 
@@ -437,3 +457,4 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+    
