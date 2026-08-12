@@ -42,6 +42,36 @@ _last_gift_time = 0.0
 GIFT_MODE = os.environ.get("GIFT_MODE", "ai").strip().lower()  # "ai" ou "npc"
 MIN_SECONDS_BETWEEN_GIFTS_NPC = float(os.environ.get("MIN_SECONDS_BETWEEN_GIFTS_NPC", "1.5"))
 
+# Classificação de presentes por nível (baseado nos presentes mais comuns do TikTok Live).
+# Presentes não listados aqui caem em "barato" por padrão (comportamento seguro/rápido).
+GIFT_TIERS = {
+    # baratos (até ~10 moedas)
+    "rosa": "barato", "rose": "barato",
+    "gg": "barato",
+    "coração": "barato", "coracao": "barato", "heart": "barato",
+    "dedo em riste": "barato", "finger heart": "barato",
+    "pulseira de amizade": "barato",
+    "confete": "barato",
+    # médios (~50 a 500 moedas)
+    "panda": "medio", "boneco de neve": "medio", "cachorro fofo": "medio",
+    "sorvete": "medio", "ice cream": "medio",
+    "capacete de festa": "medio", "microfone dourado": "medio",
+    "câmera": "medio",
+    "coelhinho": "medio",
+    # caros (1000+ moedas)
+    "leão": "caro", "leao": "caro", "lion": "caro",
+    "universo": "caro", "universe": "caro",
+    "foguete": "caro", "rocket": "caro",
+    "carro esportivo": "caro", "sports car": "caro",
+    "castelo": "caro",
+    "galáxia": "caro", "galaxia": "caro", "galaxy": "caro",
+}
+
+
+def classificar_presente(gift_name: str) -> str:
+    chave = gift_name.strip().lower()
+    return GIFT_TIERS.get(chave, "barato")
+
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), "static", "audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
@@ -154,11 +184,14 @@ def gift():
     username = str(data.get("value1", data.get("username", "alguém"))).strip() or "alguém"
     gift_name = str(data.get("value3", data.get("gift", ""))).strip() or "um presente"
 
-    # No modo NPC o cooldown é bem baixo: a fila é quem garante que nada se perde,
-    # o cooldown aqui só evita chamadas absurdamente simultâneas.
-    cooldown = MIN_SECONDS_BETWEEN_GIFTS_NPC if GIFT_MODE == "npc" else MIN_SECONDS_BETWEEN_GIFTS
+    tier = classificar_presente(gift_name)
+    vai_usar_ia = (GIFT_MODE != "npc") or (tier == "caro")
 
-    if GIFT_MODE != "npc":
+    # Presentes caros (que usam IA) respeitam o cooldown mais longo, mesmo em modo NPC.
+    # Presentes baratos/médios em modo NPC usam um cooldown bem curto, já que a fila cuida do resto.
+    cooldown = MIN_SECONDS_BETWEEN_GIFTS if vai_usar_ia else MIN_SECONDS_BETWEEN_GIFTS_NPC
+
+    if vai_usar_ia:
         with _lock:
             now = time.time()
             if now - _last_gift_time < cooldown:
@@ -166,9 +199,12 @@ def gift():
             _last_gift_time = now
 
     try:
-        if GIFT_MODE == "npc":
-            # Modo NPC clássico: só repete o nome do presente, sem passar pela IA (mais rápido e mais barato)
-            resposta_texto = gift_name
+        if not vai_usar_ia:
+            # Modo NPC clássico: repete o nome (mais forte quanto maior o nível), sem passar pela IA
+            if tier == "medio":
+                resposta_texto = f"{gift_name}! {gift_name}!"
+            else:
+                resposta_texto = gift_name
 
             nome_arquivo = f"presente_{int(time.time() * 1000)}.mp3"
             caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
@@ -184,8 +220,16 @@ def gift():
                 return jsonify({"skipped": True, "reason": "queue_full"}), 200
 
         else:
-            # Modo IA: agradecimento criativo gerado pela Groq
-            prompt_usuario = f"{username} acabou de mandar o presente '{gift_name}'."
+            # Modo IA, ou presente CARO mesmo estando em modo NPC: reação especial e elaborada
+            if tier == "caro":
+                prompt_usuario = (
+                    f"{username} acabou de mandar o presente '{gift_name}', que é um dos presentes "
+                    f"mais caros e especiais da live! Reaja com bastante empolgação e gratidão, "
+                    f"como se fosse algo realmente incrível e raro."
+                )
+            else:
+                prompt_usuario = f"{username} acabou de mandar o presente '{gift_name}'."
+
             resposta_texto, nome_arquivo = gerar_resposta_e_falar(
                 GIFT_SYSTEM_PROMPT,
                 prompt_usuario,
