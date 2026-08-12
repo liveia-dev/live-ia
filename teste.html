@@ -15,7 +15,11 @@
 <h1>🎛️ Ferramenta de Teste — Live IA</h1>
 <p>Abra o player em outra aba antes de testar: <a href="https://live-ia.onrender.com/player" target="_blank">abrir player</a></p>
 
-<button onclick="perguntar()">❓ Fazer uma pergunta de teste</button>
+<div style="border:1px solid #ccc; border-radius:8px; padding:12px; margin:12px 0;">
+  <label>Pergunta pra testar:</label>
+  <input id="textoPergunta" type="text" value="qual a capital do Japão?" style="width:100%; padding:8px; margin:8px 0; box-sizing:border-box;">
+  <button onclick="perguntar()">❓ Enviar essa pergunta</button>
+</div>
 
 <div style="border:1px solid #ccc; border-radius:8px; padding:12px; margin:12px 0;">
   <label>Nome do presente pra testar:</label>
@@ -37,12 +41,13 @@
   }
 
   async function perguntar() {
-    log("Enviando pergunta...");
+    const pergunta = document.getElementById('textoPergunta').value.trim() || "qual a capital do Japão?";
+    log("Enviando pergunta: " + pergunta + "...");
     try {
       const res = await fetch(SERVIDOR + "/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value1: "testeuser", value2: "qual a capital do Japão?" })
+        body: JSON.stringify({ value1: "testeuser", value2: pergunta })
       });
       const data = await res.json();
       log("Resposta: " + JSON.stringify(data));
