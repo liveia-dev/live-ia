@@ -170,6 +170,49 @@ def classificar_presente(gift_name: str) -> str:
     return GIFT_TIERS.get(chave, "barato")
 
 
+# NOVO: regex com as principais faixas Unicode de emojis (emoticons, símbolos,
+# pictogramas, bandeiras, dingbats, variation selector, zero-width joiner etc).
+# Usada só na hora de gerar o áudio — o texto "normal" (JSON, fila, tela) continua
+# com os emojis, só o que vai pro sintetizador de voz é que sai limpo.
+_EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F1E6-\U0001F1FF"  # bandeiras (pares de letras regionais)
+    "\U0001F300-\U0001F5FF"  # símbolos e pictogramas diversos
+    "\U0001F600-\U0001F64F"  # emoticons (carinhas)
+    "\U0001F680-\U0001F6FF"  # transporte e mapas
+    "\U0001F700-\U0001F77F"  # símbolos alquímicos
+    "\U0001F780-\U0001F7FF"  # símbolos geométricos estendidos
+    "\U0001F800-\U0001F8FF"  # setas suplementares
+    "\U0001F900-\U0001F9FF"  # símbolos suplementares (emojis mais novos)
+    "\U0001FA00-\U0001FA6F"  # símbolos de xadrez estendidos
+    "\U0001FA70-\U0001FAFF"  # símbolos e pictogramas estendidos-A
+    "\U00002600-\U000026FF"  # símbolos diversos (☀️☂️☕ etc)
+    "\U00002700-\U000027BF"  # dingbats (✂️✅✈️ etc)
+    "\U00002300-\U000023FF"  # símbolos técnicos (⏰⏳ etc)
+    "\U00002B00-\U00002BFF"  # setas e símbolos diversos (⭐➡️ etc)
+    "\U0001F000-\U0001F0FF"  # peças de mahjong/cartas/dominó
+    "\U0000FE0F"              # variation selector (força apresentação como emoji)
+    "\U0000200D"              # zero width joiner (junta emojis compostos, ex: família)
+    "\U00002190-\U000021FF"  # setas
+    "\U00002460-\U000024FF"  # números/letras em círculo
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def remover_emojis(texto: str) -> str:
+    """Tira os emojis do texto antes de mandar pro TTS, pra ele não tentar
+    'ler' o emoji em voz alta nem se confundir na pontuação/pausa por causa
+    dele. O texto com emoji continua sendo usado normalmente em todo o resto
+    (resposta JSON, fila do player, etc) — só o áudio fica sem eles."""
+    if not texto:
+        return texto
+    texto_limpo = _EMOJI_PATTERN.sub("", texto)
+    # depois de tirar o emoji pode sobrar espaço duplicado ou nas pontas — arruma isso
+    texto_limpo = re.sub(r"[ \t]{2,}", " ", texto_limpo).strip()
+    return texto_limpo
+
+
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), "static", "audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
@@ -204,9 +247,10 @@ def enfileirar(texto: str, nome_arquivo: str, avatar_clip: str = AVATAR_CLIP_IDL
 
 def gerar_audio(texto: str, caminho_saida: str, voice: str = None, pitch: str = "+0Hz", rate: str = "+0%"):
     voice = voice or VOICE_NAME
+    texto_para_fala = remover_emojis(texto)  # NOVO: o TTS nunca vê/lê o emoji, só o texto puro
 
     async def _run():
-        communicate = edge_tts.Communicate(texto, voice, pitch=pitch, rate=rate)
+        communicate = edge_tts.Communicate(texto_para_fala, voice, pitch=pitch, rate=rate)
         await communicate.save(caminho_saida)
     asyncio.run(_run())
 
