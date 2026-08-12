@@ -464,6 +464,80 @@ def sample_gift_voice():
     """
 
 
+# NOVO: rota pra testar rapidamente qualquer combinação de voz/pitch/rate e comparar
+# o quanto cada uma soa "robótica" ou natural, sem precisar mexer em código toda hora.
+# Ex: /testar-voz?voice=pt-BR-ThalitaMultilingualNeural&pitch=+0Hz&rate=+0%
+VOZES_PT_BR_PARA_TESTAR = [
+    "pt-BR-AntonioNeural",      # voz atual (padrão do script)
+    "pt-BR-FranciscaNeural",
+    "pt-BR-ThalitaMultilingualNeural",  # geração mais nova, geralmente mais natural
+    "pt-BR-DonatoNeural",
+    "pt-BR-FabioNeural",
+    "pt-BR-JulioNeural",
+    "pt-BR-NicolauNeural",
+    "pt-BR-ValerioNeural",
+    "pt-BR-LeticiaNeural",
+    "pt-BR-BrendaNeural",
+    "pt-BR-ElzaNeural",
+    "pt-BR-ManuelaNeural",
+    "pt-BR-GiovannaNeural",
+    "pt-BR-LeilaNeural",
+    "pt-BR-YaraNeural",
+    "pt-BR-HumbertoNeural",
+]
+
+
+@app.route("/testar-voz")
+def testar_voz():
+    voice = request.args.get("voice", VOICE_NAME)
+    pitch = request.args.get("pitch", "+0Hz")
+    rate = request.args.get("rate", "+0%")
+    texto = request.args.get(
+        "texto",
+        "Oi gente, tudo bem com vocês? Que bom ter vocês aqui na live hoje, "
+        "vamos bater um papo bem gostoso!",
+    )
+    formato = request.args.get("formato", "html")  # NOVO: "json" pra uso via fetch() no teste.html
+
+    nome_arquivo = f"teste_voz_{int(time.time() * 1000)}.mp3"
+    caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
+    gerar_audio(texto, caminho_completo, voice=voice, pitch=pitch, rate=rate)
+
+    base_url = request.host_url.rstrip("/")
+    audio_url = f"{base_url}/static/audio/{nome_arquivo}"
+
+    # NOVO: modo JSON, usado pela ferramenta de teste (teste.html) pra tocar
+    # o áudio inline na própria página, sem precisar abrir essa rota numa aba nova
+    if formato == "json":
+        return jsonify({
+            "voice": voice,
+            "pitch": pitch,
+            "rate": rate,
+            "texto": texto,
+            "audio_url": audio_url,
+            "filename": nome_arquivo,
+        })
+
+    links_vozes = "".join(
+        f'<a href="/testar-voz?voice={v}&pitch={pitch}&rate={rate}">{v}</a><br>'
+        for v in VOZES_PT_BR_PARA_TESTAR
+    )
+
+    return f"""
+    <html><body style="font-family:sans-serif; text-align:center; margin-top:50px;">
+        <h2>Testando: {voice} (pitch {pitch}, rate {rate})</h2>
+        <audio controls autoplay src="{audio_url}"></audio>
+        <p style="max-width:500px; margin:20px auto; color:#555;">"{texto}"</p>
+        <hr style="max-width:400px; margin:20px auto;">
+        <p><b>Trocar de voz (mesmo pitch/rate):</b><br>{links_vozes}</p>
+        <p style="margin-top:20px; color:#888;">
+            Dica: pra testar pitch/rate diferentes, edite a URL, ex:<br>
+            /testar-voz?voice={voice}&pitch=-5Hz&rate=-3%
+        </p>
+    </body></html>
+    """
+
+
 @app.route("/next")
 def next_in_queue():
     with _queue_lock:
