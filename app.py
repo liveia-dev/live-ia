@@ -37,6 +37,9 @@ GIFT_SYSTEM_PROMPT = (
 MIN_SECONDS_BETWEEN_GIFTS = float(os.environ.get("MIN_SECONDS_BETWEEN_GIFTS", "5"))
 _last_gift_time = 0.0
 
+GIFT_MODE = os.environ.get("GIFT_MODE", "ai").strip().lower()  # "ai" ou "npc"
+MIN_SECONDS_BETWEEN_GIFTS_NPC = float(os.environ.get("MIN_SECONDS_BETWEEN_GIFTS_NPC", "1.5"))
+
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), "static", "audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
@@ -136,34 +139,52 @@ def gift():
 
     # value1 = username, value3 = nome do presente (SKU), conforme o webhook do TikFinity
     username = str(data.get("value1", data.get("username", "alguém"))).strip() or "alguém"
-    gift_name = str(data.get("value3", data.get("gift", ""))).strip()
+    gift_name = str(data.get("value3", data.get("gift", ""))).strip() or "um presente"
+
+    cooldown = MIN_SECONDS_BETWEEN_GIFTS_NPC if GIFT_MODE == "npc" else MIN_SECONDS_BETWEEN_GIFTS
 
     with _lock:
         now = time.time()
-        if now - _last_gift_time < MIN_SECONDS_BETWEEN_GIFTS:
+        if now - _last_gift_time < cooldown:
             return jsonify({"skipped": True, "reason": "rate_limited"}), 200
         _last_gift_time = now
 
     try:
-        if gift_name:
-            prompt_usuario = f"{username} acabou de mandar o presente '{gift_name}'."
-        else:
-            prompt_usuario = f"{username} acabou de mandar um presente."
+        if GIFT_MODE == "npc":
+            # Modo NPC clássico: só repete o nome do presente, sem passar pela IA (mais rápido e mais barato)
+            resposta_texto = gift_name
 
-        resposta_texto, nome_arquivo = gerar_resposta_e_falar(
-            GIFT_SYSTEM_PROMPT,
-            prompt_usuario,
-            prefixo_arquivo="presente",
-            voice="pt-BR-FranciscaNeural",
-            pitch="+55Hz",
-            rate="+10%",
-        )
+            nome_arquivo = f"presente_{int(time.time() * 1000)}.mp3"
+            caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
+            gerar_audio(
+                resposta_texto,
+                caminho_completo,
+                voice="pt-BR-FranciscaNeural",
+                pitch="+55Hz",
+                rate="+10%",
+            )
+            _latest["filename"] = nome_arquivo
+            _latest["text"] = resposta_texto
+            _latest["id"] += 1
+
+        else:
+            # Modo IA: agradecimento criativo gerado pela Groq
+            prompt_usuario = f"{username} acabou de mandar o presente '{gift_name}'."
+            resposta_texto, nome_arquivo = gerar_resposta_e_falar(
+                GIFT_SYSTEM_PROMPT,
+                prompt_usuario,
+                prefixo_arquivo="presente",
+                voice="pt-BR-FranciscaNeural",
+                pitch="+55Hz",
+                rate="+10%",
+            )
 
         base_url = request.host_url.rstrip("/")
         audio_url = f"{base_url}/static/audio/{nome_arquivo}"
 
         return jsonify({
             "skipped": False,
+            "mode": GIFT_MODE,
             "text": resposta_texto,
             "audio_url": audio_url,
             "filename": nome_arquivo,
