@@ -30,6 +30,48 @@
 
 <button onclick="mandarVariosPresentes()">🎁🎁🎁 Mandar 10 rosas rápido (combo)</button>
 
+<div style="border:1px solid #ccc; border-radius:8px; padding:12px; margin:12px 0;">
+  <label>🎙️ Testar voz (achar algo menos robótico):</label>
+
+  <select id="vozSelect" style="width:100%; padding:8px; margin:8px 0; box-sizing:border-box;">
+    <option value="pt-BR-AntonioNeural">pt-BR-AntonioNeural (voz atual)</option>
+    <option value="pt-BR-FranciscaNeural">pt-BR-FranciscaNeural</option>
+    <option value="pt-BR-ThalitaMultilingualNeural">pt-BR-ThalitaMultilingualNeural (mais nova/natural)</option>
+    <option value="pt-BR-DonatoNeural">pt-BR-DonatoNeural</option>
+    <option value="pt-BR-FabioNeural">pt-BR-FabioNeural</option>
+    <option value="pt-BR-JulioNeural">pt-BR-JulioNeural</option>
+    <option value="pt-BR-NicolauNeural">pt-BR-NicolauNeural</option>
+    <option value="pt-BR-ValerioNeural">pt-BR-ValerioNeural</option>
+    <option value="pt-BR-HumbertoNeural">pt-BR-HumbertoNeural</option>
+    <option value="pt-BR-LeticiaNeural">pt-BR-LeticiaNeural</option>
+    <option value="pt-BR-BrendaNeural">pt-BR-BrendaNeural</option>
+    <option value="pt-BR-ElzaNeural">pt-BR-ElzaNeural</option>
+    <option value="pt-BR-ManuelaNeural">pt-BR-ManuelaNeural</option>
+    <option value="pt-BR-GiovannaNeural">pt-BR-GiovannaNeural</option>
+    <option value="pt-BR-LeilaNeural">pt-BR-LeilaNeural</option>
+    <option value="pt-BR-YaraNeural">pt-BR-YaraNeural</option>
+  </select>
+
+  <div style="display:flex; gap:8px;">
+    <div style="flex:1;">
+      <label style="font-size:12px; color:#666;">Pitch</label>
+      <input id="vozPitch" type="text" value="+0Hz" style="width:100%; padding:8px; box-sizing:border-box;">
+    </div>
+    <div style="flex:1;">
+      <label style="font-size:12px; color:#666;">Rate</label>
+      <input id="vozRate" type="text" value="+0%" style="width:100%; padding:8px; box-sizing:border-box;">
+    </div>
+  </div>
+
+  <label style="font-size:12px; color:#666; display:block; margin-top:8px;">Frase de teste</label>
+  <input id="vozTexto" type="text"
+         value="Oi gente, tudo bem com vocês? Que bom ter vocês aqui na live hoje, vamos bater um papo bem gostoso!"
+         style="width:100%; padding:8px; margin:8px 0; box-sizing:border-box;">
+
+  <button onclick="testarVoz()">▶️ Gerar e tocar essa voz</button>
+  <audio id="playerVoz" controls style="width:100%; margin-top:8px; display:none;"></audio>
+</div>
+
 <div id="log">Aguardando...</div>
 
 <script>
@@ -69,6 +111,30 @@
       log("Resposta: " + JSON.stringify(data));
     } catch (e) {
       log("Erro: " + e);
+    }
+  }
+
+  async function testarVoz() {
+    const voice = document.getElementById('vozSelect').value;
+    const pitch = document.getElementById('vozPitch').value.trim() || "+0Hz";
+    const rate = document.getElementById('vozRate').value.trim() || "+0%";
+    const texto = document.getElementById('vozTexto').value.trim() ||
+      "Oi gente, tudo bem com vocês?";
+    const playerVoz = document.getElementById('playerVoz');
+
+    log(`Gerando voz: ${voice} (pitch ${pitch}, rate ${rate})...`);
+    try {
+      const params = new URLSearchParams({ voice, pitch, rate, texto, formato: "json" });
+      const res = await fetch(SERVIDOR + "/testar-voz?" + params.toString());
+      const data = await res.json();
+
+      playerVoz.src = data.audio_url;
+      playerVoz.style.display = "block";
+      playerVoz.play().catch(() => {});
+
+      log(`Pronto: ${voice} | pitch ${pitch} | rate ${rate}`);
+    } catch (e) {
+      log("Erro ao testar voz: " + e);
     }
   }
 
