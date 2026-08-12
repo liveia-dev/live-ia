@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Ferramenta de Teste - Live IA</title>
+<style>
+  body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }
+  h1 { font-size: 20px; }
+  button { display: block; width: 100%; padding: 14px; margin: 8px 0; font-size: 15px; cursor: pointer; border-radius: 8px; border: 1px solid #ccc; }
+  #log { background: #f4f4f4; padding: 12px; border-radius: 8px; margin-top: 20px; font-size: 13px; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
+</style>
+</head>
+<body>
+
+<h1>🎛️ Ferramenta de Teste — Live IA</h1>
+<p>Abra o player em outra aba antes de testar: <a href="https://live-ia.onrender.com/player" target="_blank">abrir player</a></p>
+
+<button onclick="perguntar()">❓ Fazer uma pergunta de teste</button>
+<button onclick="mandarPresente()">🎁 Mandar 1 presente (Rosa)</button>
+<button onclick="mandarVariosPresentes()">🎁🎁🎁 Mandar 10 rosas rápido (combo)</button>
+
+<div id="log">Aguardando...</div>
+
+<script>
+  const SERVIDOR = "https://live-ia.onrender.com";
+  const logEl = document.getElementById('log');
+
+  function log(msg) {
+    logEl.textContent = new Date().toLocaleTimeString() + " - " + msg + "\n" + logEl.textContent;
+  }
+
+  async function perguntar() {
+    log("Enviando pergunta...");
+    try {
+      const res = await fetch(SERVIDOR + "/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value1: "testeuser", value2: "qual a capital do Japão?" })
+      });
+      const data = await res.json();
+      log("Resposta: " + JSON.stringify(data));
+    } catch (e) {
+      log("Erro: " + e);
+    }
+  }
+
+  async function mandarPresente() {
+    log("Enviando 1 presente...");
+    try {
+      const res = await fetch(SERVIDOR + "/gift", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value1: "testeuser", value3: "Rosa" })
+      });
+      const data = await res.json();
+      log("Resposta: " + JSON.stringify(data));
+    } catch (e) {
+      log("Erro: " + e);
+    }
+  }
+
+  async function mandarVariosPresentes() {
+    log("Enviando 10 rosas rapidinho...");
+    for (let i = 0; i < 10; i++) {
+      fetch(SERVIDOR + "/gift", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value1: "testeuser", value3: "Rosa" })
+      })
+        .then(r => r.json())
+        .then(data => log("Rosa " + (i + 1) + ": " + JSON.stringify(data)))
+        .catch(e => log("Erro na rosa " + (i + 1) + ": " + e));
+    }
+  }
+</script>
+
+</body>
+</html>
