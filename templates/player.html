@@ -56,16 +56,12 @@
 <body>
   <button id="ativar">🔊 Clique aqui pra ativar o áudio (só necessário testando no navegador)</button>
 
-  <!-- NOVO: pilha de vídeos do avatar. Todos ficam tocando em loop, mudo, em background.
-       Trocamos qual está visível (classe "ativo") pra fazer o crossfade via CSS.
-       Os nomes dos IDs batem com os valores de avatar_clip enviados pelo app.py:
-       avatar_idle, avatar_pergunta, avatar_presente_barato, avatar_presente_medio, avatar_presente_caro -->
+  <!-- VERSÃO LEVE: só 2 <video> no DOM (double buffer), em vez de 5 tocando sempre.
+       O src de cada um é definido/limpo dinamicamente pelo JS, então só o clipe
+       que está de fato em uso (ou em transição) fica carregado/decodificando. -->
   <div id="avatar-stage">
-    <video id="v-avatar_idle" src="/static/video/avatar_idle.mp4" class="ativo" muted loop autoplay playsinline></video>
-    <video id="v-avatar_pergunta" src="/static/video/avatar_pergunta.mp4" muted loop autoplay playsinline></video>
-    <video id="v-avatar_presente_barato" src="/static/video/avatar_presente_barato.mp4" muted loop autoplay playsinline></video>
-    <video id="v-avatar_presente_medio" src="/static/video/avatar_presente_medio.mp4" muted loop autoplay playsinline></video>
-    <video id="v-avatar_presente_caro" src="/static/video/avatar_presente_caro.mp4" muted loop autoplay playsinline></video>
+    <video id="layerA" muted loop playsinline preload="none"></video>
+    <video id="layerB" muted loop playsinline preload="none"></video>
   </div>
 
   <div id="texto"></div>
@@ -73,30 +69,51 @@
 
   <script>
     const CLIP_IDLE = 'avatar_idle';
+    const TEMPO_CROSSFADE_MS = 500; // precisa bater com a "transition" do CSS acima
 
-    // Mapeia cada nome de clipe pro elemento <video> correspondente
-    const videos = {};
-    document.querySelectorAll('#avatar-stage video').forEach(v => {
-      const nome = v.id.replace('v-', '');
-      videos[nome] = v;
-    });
+    const layers = [document.getElementById('layerA'), document.getElementById('layerB')];
+    let indiceTopo = 0;   // qual dos 2 <video> está visível agora
+    let clipAtual = null; // nome do clipe atualmente visível
 
-    let clipAtual = CLIP_IDLE;
+    function urlDoClipe(nomeClip) {
+      return '/static/video/' + nomeClip + '.mp4';
+    }
 
-    // Troca o clipe visível com crossfade (CSS cuida da transição de opacidade)
+    // Troca o clipe visível: carrega o novo vídeo no layer de baixo, espera ele
+    // estar pronto pra tocar, faz o crossfade e SÓ ENTÃO descarrega o vídeo antigo
+    // (pause + remove o src) pra não ficar consumindo CPU/memória à toa.
     function mostrarClipe(nomeClip) {
-      const alvo = videos[nomeClip] ? nomeClip : CLIP_IDLE;
+      const alvo = nomeClip || CLIP_IDLE;
       if (alvo === clipAtual) return;
 
-      const anterior = videos[clipAtual];
-      const proximo = videos[alvo];
+      const indiceFundo = 1 - indiceTopo;
+      const proximo = layers[indiceFundo];
+      const anterior = layers[indiceTopo];
 
-      if (anterior) anterior.classList.remove('ativo');
-      if (proximo) {
-        try { proximo.currentTime = 0; } catch (e) {}
+      const aoPoderTocar = () => {
+        proximo.removeEventListener('canplay', aoPoderTocar);
+        proximo.currentTime = 0;
+        proximo.play().catch(() => {});
         proximo.classList.add('ativo');
-      }
+        anterior.classList.remove('ativo');
+
+        // libera o vídeo anterior um pouco depois do crossfade terminar,
+        // exceto se o novo clipe já for o mesmo (evita descarregar à toa)
+        setTimeout(() => {
+          if (anterior !== proximo) {
+            anterior.pause();
+            anterior.removeAttribute('src');
+            anterior.load(); // limpa o buffer decodificado
+          }
+        }, TEMPO_CROSSFADE_MS + 50);
+      };
+
+      proximo.addEventListener('canplay', aoPoderTocar);
+      proximo.src = urlDoClipe(alvo);
+      proximo.load();
+
       clipAtual = alvo;
+      indiceTopo = indiceFundo;
     }
 
     const audioEl = document.getElementById('player');
@@ -117,7 +134,6 @@
         tocandoAgora = true;
         inicioTocando = Date.now();
 
-        // NOVO: troca o avatar pro clipe indicado no item da fila (pergunta/barato/medio/caro)
         mostrarClipe(data.avatar_clip || CLIP_IDLE);
 
         audioEl.src = '/static/audio/' + data.filename;
@@ -134,9 +150,10 @@
     botaoAtivar.addEventListener('click', () => {
       audioEl.play().catch(() => {});
       audioEl.pause();
-      // garante que todos os vídeos comecem a tocar (alguns navegadores exigem interação do usuário)
-      Object.values(videos).forEach(v => v.play().catch(() => {}));
       botaoAtivar.style.display = 'none';
+
+      // carrega o idle pela primeira vez (nenhum vídeo carregado até aqui)
+      mostrarClipe(CLIP_IDLE);
       tocarProximo();
     });
 
