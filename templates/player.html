@@ -23,12 +23,14 @@
   </style>
 </head>
 <body>
+  <button id="ativar" style="font-size:16px; padding:16px; margin:20px;">🔊 Clique aqui pra ativar o áudio (só necessário testando no navegador)</button>
   <div id="texto"></div>
   <audio id="player"></audio>
 
   <script>
     const audioEl = document.getElementById('player');
     const textoEl = document.getElementById('texto');
+    const botaoAtivar = document.getElementById('ativar');
     let tocandoAgora = false;
 
     async function tocarProximo() {
@@ -50,6 +52,13 @@
         // silencioso: tenta de novo no próximo ciclo
       }
     }
+
+    botaoAtivar.addEventListener('click', () => {
+      audioEl.play().catch(() => {});
+      audioEl.pause();
+      botaoAtivar.style.display = 'none';
+      tocarProximo();
+    });
 
     audioEl.addEventListener('ended', () => {
       tocandoAgora = false;
