@@ -426,6 +426,56 @@ def gift():
         return jsonify({"skipped": True, "reason": "error", "detail": str(e)}), 500
 
 
+@app.route("/falar", methods=["POST"])
+def falar():
+    """Rota pra fala livre 'sob demanda' (boas-vindas ou qualquer outro texto
+    que você queira que o avatar diga na hora). Diferente de /ask e /gift,
+    aqui o texto NÃO passa pela IA — ele fala exatamente o que você mandar,
+    só gera o áudio (edge_tts) e coloca na fila do player."""
+    data = request.get_json(force=True, silent=True) or {}
+
+    # Aceita "texto" (nosso formato) ou "value2" (se um dia quiser disparar
+    # via TikFinity/outro webhook usando o mesmo formato de /ask)
+    texto = str(data.get("texto", data.get("value2", ""))).strip()
+
+    if len(texto) < 1:
+        return jsonify({"skipped": True, "reason": "texto_vazio"}), 200
+
+    # Voz/pitch/rate são opcionais: se não vierem, usa a voz "principal"
+    # (a mesma tonalidade pausada/envolvente do /ask)
+    voice = str(data.get("voice") or VOICE_NAME).strip()
+    pitch = str(data.get("pitch") or PITCH_PRINCIPAL).strip()
+    rate = str(data.get("rate") or RATE_PRINCIPAL).strip()
+
+    # Clipe do avatar exibido enquanto fala — por padrão usa o de "pergunta"
+    # (boca mexendo normal); dá pra mandar outro clipe se quiser (ex: um
+    # clipe específico de boas-vindas, se você criar um)
+    avatar_clip = str(data.get("avatar_clip") or AVATAR_CLIP_PERGUNTA).strip()
+
+    try:
+        nome_arquivo = f"falar_{int(time.time() * 1000)}.mp3"
+        caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
+        gerar_audio(texto, caminho_completo, voice=voice, pitch=pitch, rate=rate)
+
+        colocou_na_fila = enfileirar(texto, nome_arquivo, avatar_clip=avatar_clip)
+        if not colocou_na_fila:
+            return jsonify({"skipped": True, "reason": "queue_full"}), 200
+
+        base_url = request.host_url.rstrip("/")
+        audio_url = f"{base_url}/static/audio/{nome_arquivo}"
+
+        return jsonify({
+            "skipped": False,
+            "text": texto,
+            "audio_url": audio_url,
+            "filename": nome_arquivo,
+            "avatar_clip": avatar_clip,
+        })
+
+    except Exception as e:
+        return jsonify({"skipped": True, "reason": "error", "detail": str(e)}), 500
+
+
 @app.route("/sample-gift-voice")
 def sample_gift_voice():
     style = request.args.get("style", "esquilo")

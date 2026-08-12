@@ -31,6 +31,12 @@
 <button onclick="mandarVariosPresentes()">🎁🎁🎁 Mandar 10 rosas rápido (combo)</button>
 
 <div style="border:1px solid #ccc; border-radius:8px; padding:12px; margin:12px 0;">
+  <label>🗣️ Falar algo agora (boas-vindas, avisos, etc — vai direto pra fila, sem passar pela IA):</label>
+  <textarea id="textoFalar" rows="3" style="width:100%; padding:8px; margin:8px 0; box-sizing:border-box; font-family:inherit;">Sejam muito bem-vindos à live, pessoal!</textarea>
+  <button onclick="falarAgora()">🗣️ Mandar pra fila</button>
+</div>
+
+<div style="border:1px solid #ccc; border-radius:8px; padding:12px; margin:12px 0;">
   <label>🎙️ Testar voz (achar algo menos robótico):</label>
 
   <select id="vozSelect" style="width:100%; padding:8px; margin:8px 0; box-sizing:border-box;">
@@ -106,6 +112,26 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value1: "testeuser", value3: nome })
+      });
+      const data = await res.json();
+      log("Resposta: " + JSON.stringify(data));
+    } catch (e) {
+      log("Erro: " + e);
+    }
+  }
+
+  async function falarAgora() {
+    const texto = document.getElementById('textoFalar').value.trim();
+    if (!texto) {
+      log("Digite algum texto antes de mandar.");
+      return;
+    }
+    log("Enviando pra fala: " + texto + "...");
+    try {
+      const res = await fetch(SERVIDOR + "/falar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texto: texto })
       });
       const data = await res.json();
       log("Resposta: " + JSON.stringify(data));
