@@ -26,7 +26,7 @@
       left: 0;
       width: 100%;
       height: 100%;
-      object-fit: contain;
+      object-fit: cover;
       opacity: 0;
     }
     /* camadas de conteúdo (idle / pergunta / presentes): troca quase instantânea,
@@ -80,7 +80,7 @@
 
   <script>
     const CLIP_IDLE = 'avatar_idle';
-    const CLIP_TRANSICAO = 'avatar_transicao';
+    const CLIP_TRANSICAO = 'avatar_transicao_08s';
 
     // Vídeos hospedados como assets de uma GitHub Release (gratuito, sem cartão,
     // servido pela CDN da Fastly por trás do GitHub).
@@ -89,10 +89,9 @@
     }
 
     // TEMPO_COBERTURA_MS: quanto tempo a transição fica 100% cobrindo a tela
-    // antes de revelar o novo clipe por baixo. Ajuste esse valor olhando o seu
-    // avatar_transicao.mp4 — idealmente é o "auge" visual do vídeo (o momento
-    // em que ele cobre mais a tela), não o começo nem o fim dele.
-    const TEMPO_COBERTURA_MS = 280;
+    // antes de revelar o novo clipe por baixo. Calculado como ~55% da duração
+    // real do avatar_transicao_08s.mp4 (0,81s no total).
+    const TEMPO_COBERTURA_MS = 450;
 
     // Precisa bater com a duração do "transition: opacity" do #transitionLayer no CSS acima.
     const FADE_TRANSICAO_MS = 220;
