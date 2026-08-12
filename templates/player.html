@@ -125,6 +125,7 @@
     // DE um estado PRA outro, não na primeira vez que a tela liga.
     async function mostrarClipeInstantaneo(nomeClip) {
       const layer = layers[indiceTopo];
+      layer.loop = true; // NOVO: clipe de conteúdo fica em loop contínuo, nunca congela no último frame
       layer.src = urlDoClipe(nomeClip);
       layer.load();
       await aguardarCanPlay(layer);
@@ -148,6 +149,7 @@
       const anterior = layers[indiceTopo];
 
       // 1. prepara o próximo clipe em segundo plano, ainda invisível
+      proximo.loop = true; // NOVO: clipe de conteúdo fica em loop contínuo, nunca congela no último frame
       proximo.src = urlDoClipe(alvo);
       proximo.load();
       await aguardarCanPlay(proximo);
