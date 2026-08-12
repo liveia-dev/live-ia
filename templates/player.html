@@ -27,27 +27,37 @@
   <audio id="player"></audio>
 
   <script>
-    let lastId = 0;
     const audioEl = document.getElementById('player');
     const textoEl = document.getElementById('texto');
+    let tocandoAgora = false;
 
-    async function checarNovaResposta() {
+    async function tocarProximo() {
+      if (tocandoAgora) return;
+
       try {
-        const res = await fetch('/latest');
+        const res = await fetch('/next');
         const data = await res.json();
 
-        if (data.id && data.id !== lastId && data.filename) {
-          lastId = data.id;
-          audioEl.src = '/static/audio/' + data.filename;
-          audioEl.play().catch(() => {});
-          textoEl.textContent = data.text || '';
-        }
+        if (data.empty) return;
+
+        tocandoAgora = true;
+        audioEl.src = '/static/audio/' + data.filename;
+        textoEl.textContent = data.text || '';
+        audioEl.play().catch(() => {
+          tocandoAgora = false;
+        });
       } catch (e) {
-        // silencioso: só tenta de novo no próximo ciclo
+        // silencioso: tenta de novo no próximo ciclo
       }
     }
 
-    setInterval(checarNovaResposta, 2000);
+    audioEl.addEventListener('ended', () => {
+      tocandoAgora = false;
+      tocarProximo();
+    });
+
+    // checa a fila periodicamente, caso não tenha nada tocando no momento
+    setInterval(tocarProximo, 1000);
   </script>
 </body>
 </html>
