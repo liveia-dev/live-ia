@@ -45,7 +45,20 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 
 _last_answer_time = 0.0
 _lock = threading.Lock()
-_latest = {"filename": None, "text": None, "id": 0}
+_queue = []  # fila de áudios esperando pra tocar, na ordem em que chegaram
+_queue_lock = threading.Lock()
+_next_id = 0
+MAX_QUEUE_SIZE = int(os.environ.get("MAX_QUEUE_SIZE", "20"))
+
+
+def enfileirar(texto: str, nome_arquivo: str):
+    global _next_id
+    with _queue_lock:
+        if len(_queue) >= MAX_QUEUE_SIZE:
+            return False  # fila cheia, ignora pra não deixar a live num monólogo infinito
+        _next_id += 1
+        _queue.append({"id": _next_id, "text": texto, "filename": nome_arquivo})
+        return True
 
 
 def gerar_audio(texto: str, caminho_saida: str, voice: str = None, pitch: str = "+0Hz", rate: str = "+0%"):
@@ -74,9 +87,7 @@ def gerar_resposta_e_falar(system_prompt: str, prompt_usuario: str, prefixo_arqu
     caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
     gerar_audio(resposta_texto, caminho_completo, voice=voice, pitch=pitch, rate=rate)
 
-    _latest["filename"] = nome_arquivo
-    _latest["text"] = resposta_texto
-    _latest["id"] += 1
+    enfileirar(resposta_texto, nome_arquivo)
 
     return resposta_texto, nome_arquivo
 
@@ -141,13 +152,16 @@ def gift():
     username = str(data.get("value1", data.get("username", "alguém"))).strip() or "alguém"
     gift_name = str(data.get("value3", data.get("gift", ""))).strip() or "um presente"
 
+    # No modo NPC o cooldown é bem baixo: a fila é quem garante que nada se perde,
+    # o cooldown aqui só evita chamadas absurdamente simultâneas.
     cooldown = MIN_SECONDS_BETWEEN_GIFTS_NPC if GIFT_MODE == "npc" else MIN_SECONDS_BETWEEN_GIFTS
 
-    with _lock:
-        now = time.time()
-        if now - _last_gift_time < cooldown:
-            return jsonify({"skipped": True, "reason": "rate_limited"}), 200
-        _last_gift_time = now
+    if GIFT_MODE != "npc":
+        with _lock:
+            now = time.time()
+            if now - _last_gift_time < cooldown:
+                return jsonify({"skipped": True, "reason": "rate_limited"}), 200
+            _last_gift_time = now
 
     try:
         if GIFT_MODE == "npc":
@@ -163,9 +177,9 @@ def gift():
                 pitch="+55Hz",
                 rate="+10%",
             )
-            _latest["filename"] = nome_arquivo
-            _latest["text"] = resposta_texto
-            _latest["id"] += 1
+            colocou_na_fila = enfileirar(resposta_texto, nome_arquivo)
+            if not colocou_na_fila:
+                return jsonify({"skipped": True, "reason": "queue_full"}), 200
 
         else:
             # Modo IA: agradecimento criativo gerado pela Groq
@@ -232,9 +246,13 @@ def sample_gift_voice():
     """
 
 
-@app.route("/latest")
-def latest():
-    return jsonify(_latest)
+@app.route("/next")
+def next_in_queue():
+    with _queue_lock:
+        if not _queue:
+            return jsonify({"empty": True})
+        item = _queue.pop(0)
+        return jsonify({"empty": False, **item})
 
 
 @app.route("/static/audio/<path:filename>")
