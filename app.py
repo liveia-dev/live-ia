@@ -3,11 +3,13 @@ import time
 import asyncio
 import threading
 from flask import Flask, request, jsonify, send_from_directory, render_template
+from flask_cors import CORS
 
 import edge_tts
 from groq import Groq
 
 app = Flask(__name__)
+CORS(app)
 
 # ---------- Configurações (vêm das variáveis de ambiente do Render) ----------
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
