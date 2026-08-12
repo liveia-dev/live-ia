@@ -4,12 +4,34 @@
   <meta charset="UTF-8">
   <title>Player IA da Live</title>
   <style>
-    body {
+    html, body {
       margin: 0;
+      padding: 0;
       background: transparent;
+      overflow: hidden;
       font-family: sans-serif;
       color: #fff;
       font-size: 14px;
+    }
+    #avatar-stage {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+    }
+    #avatar-stage video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity 0.5s ease-in-out;
+    }
+    #avatar-stage video.ativo {
+      opacity: 1;
     }
     #texto {
       position: fixed;
@@ -19,20 +41,68 @@
       background: rgba(0,0,0,0.5);
       padding: 8px 12px;
       border-radius: 8px;
+      z-index: 10;
+    }
+    #ativar {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 20;
+      font-size: 16px;
+      padding: 16px;
     }
   </style>
 </head>
 <body>
-  <button id="ativar" style="font-size:16px; padding:16px; margin:20px;">🔊 Clique aqui pra ativar o áudio (só necessário testando no navegador)</button>
+  <button id="ativar">🔊 Clique aqui pra ativar o áudio (só necessário testando no navegador)</button>
+
+  <!-- NOVO: pilha de vídeos do avatar. Todos ficam tocando em loop, mudo, em background.
+       Trocamos qual está visível (classe "ativo") pra fazer o crossfade via CSS.
+       Os nomes dos IDs batem com os valores de avatar_clip enviados pelo app.py:
+       avatar_idle, avatar_pergunta, avatar_presente_barato, avatar_presente_medio, avatar_presente_caro -->
+  <div id="avatar-stage">
+    <video id="v-avatar_idle" src="/static/video/avatar_idle.mp4" class="ativo" muted loop autoplay playsinline></video>
+    <video id="v-avatar_pergunta" src="/static/video/avatar_pergunta.mp4" muted loop autoplay playsinline></video>
+    <video id="v-avatar_presente_barato" src="/static/video/avatar_presente_barato.mp4" muted loop autoplay playsinline></video>
+    <video id="v-avatar_presente_medio" src="/static/video/avatar_presente_medio.mp4" muted loop autoplay playsinline></video>
+    <video id="v-avatar_presente_caro" src="/static/video/avatar_presente_caro.mp4" muted loop autoplay playsinline></video>
+  </div>
+
   <div id="texto"></div>
   <audio id="player"></audio>
 
   <script>
+    const CLIP_IDLE = 'avatar_idle';
+
+    // Mapeia cada nome de clipe pro elemento <video> correspondente
+    const videos = {};
+    document.querySelectorAll('#avatar-stage video').forEach(v => {
+      const nome = v.id.replace('v-', '');
+      videos[nome] = v;
+    });
+
+    let clipAtual = CLIP_IDLE;
+
+    // Troca o clipe visível com crossfade (CSS cuida da transição de opacidade)
+    function mostrarClipe(nomeClip) {
+      const alvo = videos[nomeClip] ? nomeClip : CLIP_IDLE;
+      if (alvo === clipAtual) return;
+
+      const anterior = videos[clipAtual];
+      const proximo = videos[alvo];
+
+      if (anterior) anterior.classList.remove('ativo');
+      if (proximo) {
+        try { proximo.currentTime = 0; } catch (e) {}
+        proximo.classList.add('ativo');
+      }
+      clipAtual = alvo;
+    }
+
     const audioEl = document.getElementById('player');
     const textoEl = document.getElementById('texto');
     const botaoAtivar = document.getElementById('ativar');
     let tocandoAgora = false;
-
     let inicioTocando = null;
 
     async function tocarProximo() {
@@ -46,10 +116,15 @@
 
         tocandoAgora = true;
         inicioTocando = Date.now();
+
+        // NOVO: troca o avatar pro clipe indicado no item da fila (pergunta/barato/medio/caro)
+        mostrarClipe(data.avatar_clip || CLIP_IDLE);
+
         audioEl.src = '/static/audio/' + data.filename;
         textoEl.textContent = data.text || '';
         audioEl.play().catch(() => {
           tocandoAgora = false;
+          mostrarClipe(CLIP_IDLE);
         });
       } catch (e) {
         // silencioso: tenta de novo no próximo ciclo
@@ -59,26 +134,29 @@
     botaoAtivar.addEventListener('click', () => {
       audioEl.play().catch(() => {});
       audioEl.pause();
+      // garante que todos os vídeos comecem a tocar (alguns navegadores exigem interação do usuário)
+      Object.values(videos).forEach(v => v.play().catch(() => {}));
       botaoAtivar.style.display = 'none';
       tocarProximo();
     });
 
     audioEl.addEventListener('ended', () => {
       tocandoAgora = false;
+      mostrarClipe(CLIP_IDLE); // volta sozinho pro idle quando a fala termina
       tocarProximo();
     });
 
     audioEl.addEventListener('error', () => {
-      // se um áudio falhar ao carregar/tocar, não trava a fila: pula pro próximo
       tocandoAgora = false;
+      mostrarClipe(CLIP_IDLE);
       tocarProximo();
     });
 
-    // trava de segurança: se travar tocando por mais de 15s sem terminar, libera de novo
-    // e também checa a fila periodicamente, caso não tenha nada tocando no momento
+    // trava de segurança + checagem periódica da fila
     setInterval(() => {
       if (tocandoAgora && inicioTocando && (Date.now() - inicioTocando > 15000)) {
         tocandoAgora = false;
+        mostrarClipe(CLIP_IDLE);
       }
       tocarProximo();
     }, 1000);
