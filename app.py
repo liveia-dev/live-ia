@@ -19,6 +19,12 @@ VOICE_NAME = os.environ.get("VOICE_NAME", "pt-BR-AntonioNeural")  # troque para 
 MIN_SECONDS_BETWEEN_ANSWERS = float(os.environ.get("MIN_SECONDS_BETWEEN_ANSWERS", "8"))
 MIN_MESSAGE_LENGTH = int(os.environ.get("MIN_MESSAGE_LENGTH", "4"))
 
+# Ajuste fino de pitch/rate da voz PRINCIPAL (a que responde perguntas no /ask),
+# pra soar mais pausada e envolvente em vez do padrão "neutro" da Thalita.
+# Dá pra testar outros valores direto no Render (env vars), sem mexer no código.
+PITCH_PRINCIPAL = os.environ.get("PITCH_PRINCIPAL", "-10Hz")
+RATE_PRINCIPAL = os.environ.get("RATE_PRINCIPAL", "-8%")
+
 # Expressões que costumam indicar um pedido de explicação/dúvida, mesmo sem "?"
 # (ex: "me ensina o que é PNL", "explica como funciona isso", "não entendi essa parte")
 PALAVRAS_DE_PERGUNTA = [
@@ -253,6 +259,7 @@ def ask():
             system_prompt_atualizado, prompt_usuario, prefixo_arquivo="resposta",
             avatar_clip=AVATAR_CLIP_PERGUNTA,  # NOVO
             model="groq/compound-mini",  # NOVO: acesso a dados reais/atuais via busca embutida
+            pitch=PITCH_PRINCIPAL, rate=RATE_PRINCIPAL,  # NOVO: tom mais pausado/envolvente
         )
 
         base_url = request.host_url.rstrip("/")
