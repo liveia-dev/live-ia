@@ -262,6 +262,11 @@ def serve_audio(filename):
     return send_from_directory(AUDIO_DIR, filename)
 
 
+@app.route("/teste.html")
+def pagina_teste():
+    return send_from_directory(os.path.dirname(__file__), "teste.html")
+
+
 @app.route("/player")
 def player():
     return render_template("player.html")
