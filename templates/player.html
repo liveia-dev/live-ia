@@ -28,9 +28,21 @@
       height: 100%;
       object-fit: cover;
       opacity: 0;
-      transition: opacity 0.5s ease-in-out;
     }
-    #avatar-stage video.ativo {
+    /* camadas de conteúdo (idle / pergunta / presentes): troca quase instantânea,
+       porque quem "esconde" a troca é a camada de transição por cima */
+    #layerA, #layerB {
+      transition: opacity 0.08s linear;
+    }
+    #layerA.ativo, #layerB.ativo {
+      opacity: 1;
+    }
+    /* camada de transição: fica por cima de tudo, cobre a tela e revela o novo clipe */
+    #transitionLayer {
+      z-index: 5;
+      transition: opacity 0.22s ease-in-out;
+    }
+    #transitionLayer.ativo {
       opacity: 1;
     }
     #texto {
@@ -56,12 +68,11 @@
 <body>
   <button id="ativar">🔊 Clique aqui pra ativar o áudio (só necessário testando no navegador)</button>
 
-  <!-- VERSÃO LEVE: só 2 <video> no DOM (double buffer), em vez de 5 tocando sempre.
-       O src de cada um é definido/limpo dinamicamente pelo JS, então só o clipe
-       que está de fato em uso (ou em transição) fica carregado/decodificando. -->
   <div id="avatar-stage">
-    <video id="layerA" muted loop playsinline preload="none"></video>
-    <video id="layerB" muted loop playsinline preload="none"></video>
+    <video id="layerA" muted playsinline preload="none"></video>
+    <video id="layerB" muted playsinline preload="none"></video>
+    <!-- camada de transição: fica sempre pré-carregada (é pequena e usada em toda troca) -->
+    <video id="transitionLayer" muted playsinline preload="auto"></video>
   </div>
 
   <div id="texto"></div>
@@ -69,51 +80,107 @@
 
   <script>
     const CLIP_IDLE = 'avatar_idle';
-    const TEMPO_CROSSFADE_MS = 500; // precisa bater com a "transition" do CSS acima
+    const CLIP_TRANSICAO = 'avatar_transicao';
 
-    const layers = [document.getElementById('layerA'), document.getElementById('layerB')];
-    let indiceTopo = 0;   // qual dos 2 <video> está visível agora
-    let clipAtual = null; // nome do clipe atualmente visível
-
+    // Se depois vocês migrarem os vídeos pra Cloudflare R2/Bunny, troque só esta função.
     function urlDoClipe(nomeClip) {
       return '/static/video/' + nomeClip + '.mp4';
+      // Exemplo pra CDN externa:
+      // return 'https://SEU-BUCKET.exemplo.com/' + nomeClip + '.mp4';
     }
 
-    // Troca o clipe visível: carrega o novo vídeo no layer de baixo, espera ele
-    // estar pronto pra tocar, faz o crossfade e SÓ ENTÃO descarrega o vídeo antigo
-    // (pause + remove o src) pra não ficar consumindo CPU/memória à toa.
-    function mostrarClipe(nomeClip) {
+    // TEMPO_COBERTURA_MS: quanto tempo a transição fica 100% cobrindo a tela
+    // antes de revelar o novo clipe por baixo. Ajuste esse valor olhando o seu
+    // avatar_transicao.mp4 — idealmente é o "auge" visual do vídeo (o momento
+    // em que ele cobre mais a tela), não o começo nem o fim dele.
+    const TEMPO_COBERTURA_MS = 280;
+
+    // Precisa bater com a duração do "transition: opacity" do #transitionLayer no CSS acima.
+    const FADE_TRANSICAO_MS = 220;
+
+    const layers = [document.getElementById('layerA'), document.getElementById('layerB')];
+    const transitionEl = document.getElementById('transitionLayer');
+    transitionEl.src = urlDoClipe(CLIP_TRANSICAO);
+    transitionEl.load();
+
+    let indiceTopo = 0;
+    let clipAtual = null;
+    let transicaoEmAndamento = false;
+
+    function aguardarCanPlay(video) {
+      return new Promise((resolve) => {
+        if (video.readyState >= 3) return resolve();
+        const onReady = () => {
+          video.removeEventListener('canplay', onReady);
+          resolve();
+        };
+        video.addEventListener('canplay', onReady);
+      });
+    }
+
+    function esperar(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    // Primeira exibição (ao clicar em "ativar"): mostra o idle direto,
+    // sem gastar a transição logo de cara — só faz sentido transicionar
+    // DE um estado PRA outro, não na primeira vez que a tela liga.
+    async function mostrarClipeInstantaneo(nomeClip) {
+      const layer = layers[indiceTopo];
+      layer.src = urlDoClipe(nomeClip);
+      layer.load();
+      await aguardarCanPlay(layer);
+      layer.currentTime = 0;
+      layer.play().catch(() => {});
+      layer.classList.add('ativo');
+      clipAtual = nomeClip;
+    }
+
+    // Troca "com moldura": cobre a tela com a transição, troca o clipe por
+    // baixo enquanto está escondido, e revela o novo clipe já tocando.
+    // Isso acontece tanto entrando num estado (idle -> presente) quanto
+    // saindo dele de volta (presente -> idle) — a mesma transição sempre.
+    async function mostrarClipe(nomeClip) {
       const alvo = nomeClip || CLIP_IDLE;
-      if (alvo === clipAtual) return;
+      if (alvo === clipAtual || transicaoEmAndamento) return;
+      transicaoEmAndamento = true;
 
       const indiceFundo = 1 - indiceTopo;
       const proximo = layers[indiceFundo];
       const anterior = layers[indiceTopo];
 
-      const aoPoderTocar = () => {
-        proximo.removeEventListener('canplay', aoPoderTocar);
-        proximo.currentTime = 0;
-        proximo.play().catch(() => {});
-        proximo.classList.add('ativo');
-        anterior.classList.remove('ativo');
-
-        // libera o vídeo anterior um pouco depois do crossfade terminar,
-        // exceto se o novo clipe já for o mesmo (evita descarregar à toa)
-        setTimeout(() => {
-          if (anterior !== proximo) {
-            anterior.pause();
-            anterior.removeAttribute('src');
-            anterior.load(); // limpa o buffer decodificado
-          }
-        }, TEMPO_CROSSFADE_MS + 50);
-      };
-
-      proximo.addEventListener('canplay', aoPoderTocar);
+      // 1. prepara o próximo clipe em segundo plano, ainda invisível
       proximo.src = urlDoClipe(alvo);
       proximo.load();
+      await aguardarCanPlay(proximo);
+
+      // 2. cobre a tela com a transição
+      transitionEl.currentTime = 0;
+      transitionEl.play().catch(() => {});
+      transitionEl.classList.add('ativo');
+      await esperar(TEMPO_COBERTURA_MS);
+
+      // 3. troca por baixo, escondido pela transição (troca quase instantânea)
+      proximo.currentTime = 0;
+      proximo.play().catch(() => {});
+      proximo.classList.add('ativo');
+      anterior.classList.remove('ativo');
+
+      // 4. revela o novo clipe tirando a transição de cima
+      transitionEl.classList.remove('ativo');
 
       clipAtual = alvo;
       indiceTopo = indiceFundo;
+
+      // 5. libera o clipe anterior (não é mais o mesmo layer usado agora)
+      setTimeout(() => {
+        if (anterior !== proximo) {
+          anterior.pause();
+          anterior.removeAttribute('src');
+          anterior.load();
+        }
+        transicaoEmAndamento = false;
+      }, FADE_TRANSICAO_MS + 50);
     }
 
     const audioEl = document.getElementById('player');
@@ -134,7 +201,9 @@
         tocandoAgora = true;
         inicioTocando = Date.now();
 
-        mostrarClipe(data.avatar_clip || CLIP_IDLE);
+        // espera a transição terminar de revelar o novo clipe antes de
+        // começar a falar — o avatar "chega" visualmente antes de falar
+        await mostrarClipe(data.avatar_clip || CLIP_IDLE);
 
         audioEl.src = '/static/audio/' + data.filename;
         textoEl.textContent = data.text || '';
@@ -147,19 +216,18 @@
       }
     }
 
-    botaoAtivar.addEventListener('click', () => {
+    botaoAtivar.addEventListener('click', async () => {
       audioEl.play().catch(() => {});
       audioEl.pause();
       botaoAtivar.style.display = 'none';
 
-      // carrega o idle pela primeira vez (nenhum vídeo carregado até aqui)
-      mostrarClipe(CLIP_IDLE);
+      await mostrarClipeInstantaneo(CLIP_IDLE);
       tocarProximo();
     });
 
     audioEl.addEventListener('ended', () => {
       tocandoAgora = false;
-      mostrarClipe(CLIP_IDLE); // volta sozinho pro idle quando a fala termina
+      mostrarClipe(CLIP_IDLE); // volta sozinho pro idle, com a mesma transição
       tocarProximo();
     });
 
