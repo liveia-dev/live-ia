@@ -2,6 +2,8 @@ import os
 import time
 import asyncio
 import threading
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify, send_from_directory, render_template
 from flask_cors import CORS
 
@@ -33,22 +35,62 @@ PALAVRAS_DE_PERGUNTA = [
 
 client = Groq(api_key=GROQ_API_KEY)
 
+# Regra crítica em ambos os prompts: o texto gerado aqui vai direto pro TTS e é
+# falado palavra por palavra. Qualquer rubrica de roteiro ("(pausa dramática)",
+# "*ri*", "[risos]") é lida em voz alta pelo sintetizador, o que soa horrível
+# ao vivo — por isso deixamos essa proibição bem explícita, repetida e no início.
+REGRA_SAIDA_PARA_VOZ = (
+    "REGRA MAIS IMPORTANTE: sua resposta vai ser lida em voz alta por um sintetizador de voz (TTS), "
+    "palavra por palavra, sem nenhum tipo de edição. Por isso, escreva SOMENTE o texto que deve ser "
+    "falado. NUNCA inclua rubricas de roteiro, indicações de cena, ações ou sons entre parênteses, "
+    "colchetes ou asteriscos — coisas como '(pausa dramática)', '*ri*', '[risos]', '(sussurra)' são "
+    "proibidas, porque o TTS vai ler isso tudo em voz alta pro público, o que fica muito estranho. "
+    "Se quiser dar ênfase ou fazer uma pausa, faça isso só com as palavras e a pontuação (reticências, "
+    "exclamação), nunca descrevendo a ação."
+)
+
 SYSTEM_PROMPT = (
+    REGRA_SAIDA_PARA_VOZ + " "
     "Você é o assistente de voz de uma live de bate-papo descontraída no TikTok. "
     "Responda às perguntas do chat de forma curta (no máximo 2 a 3 frases), "
     "leve, simpática e com bom humor, em português do Brasil. "
     "Nunca use palavrão, conteúdo sexual, ofensivo ou pesado. "
     "Se a pergunta for confusa ou incompleta, responda de forma engraçada e gentil pedindo pra repetir. "
-    "Fale como se estivesse conversando de verdade com a pessoa, sem enrolação."
+    "Fale como se estivesse conversando de verdade com a pessoa, sem enrolação. "
+    "Se você não souber a resposta ou não tiver certeza de algo, diga isso de forma direta e simpática, "
+    "sem fingir que vai checar um site e sem simular que está pesquisando em tempo real."
 )
 
 GIFT_SYSTEM_PROMPT = (
+    REGRA_SAIDA_PARA_VOZ + " "
     "Você é o assistente de voz de uma live de bate-papo descontraída no TikTok. "
     "Alguém acabou de te mandar um presente virtual durante a live. "
     "Agradeça de forma curta (1 frase, no máximo 2), animada e criativa, mencionando o nome da "
     "pessoa e, se fizer sentido, o nome do presente. Varie as frases, não repita sempre o mesmo agradecimento. "
     "Nunca use palavrão, conteúdo sexual, ofensivo ou pesado. Fale em português do Brasil."
 )
+
+
+def obter_contexto_data_hora() -> str:
+    """Monta uma frase com a data/hora reais de agora (fuso de São Paulo),
+    pra injetar no prompt e o modelo parar de "chutar" ou alucinar sobre
+    que dia é hoje."""
+    agora = datetime.now(ZoneInfo("America/Sao_Paulo"))
+    dias_semana = [
+        "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+        "sexta-feira", "sábado", "domingo",
+    ]
+    meses = [
+        "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+        "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+    ]
+    dia_semana = dias_semana[agora.weekday()]
+    mes = meses[agora.month - 1]
+    return (
+        f"Informação real e atual: hoje é {dia_semana}, {agora.day} de {mes} de {agora.year}, "
+        f"e agora são {agora.strftime('%H:%M')} (horário de São Paulo/Brasil). "
+        f"Use essa informação com naturalidade se alguém perguntar a data ou as horas."
+    )
 
 MIN_SECONDS_BETWEEN_GIFTS = float(os.environ.get("MIN_SECONDS_BETWEEN_GIFTS", "5"))
 _last_gift_time = 0.0
@@ -146,9 +188,9 @@ def gerar_audio(texto: str, caminho_saida: str, voice: str = None, pitch: str = 
 
 def gerar_resposta_e_falar(system_prompt: str, prompt_usuario: str, prefixo_arquivo: str = "resposta",
                             voice: str = None, pitch: str = "+0Hz", rate: str = "+0%",
-                            avatar_clip: str = AVATAR_CLIP_IDLE):
+                            avatar_clip: str = AVATAR_CLIP_IDLE, model: str = "llama-3.3-70b-versatile"):
     completion = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt_usuario},
@@ -202,9 +244,15 @@ def ask():
 
     try:
         prompt_usuario = message if not username else f"{username} perguntou: {message}"
+
+        # NOVO: injeta a data/hora reais no prompt (resolve perguntas tipo "que dia é hoje")
+        # e usa o groq/compound-mini, que tem busca na web embutida e aciona sozinho
+        # quando a pergunta precisa de informação atual (notícia, resultado de jogo, etc.)
+        system_prompt_atualizado = f"{SYSTEM_PROMPT} {obter_contexto_data_hora()}"
         resposta_texto, nome_arquivo = gerar_resposta_e_falar(
-            SYSTEM_PROMPT, prompt_usuario, prefixo_arquivo="resposta",
+            system_prompt_atualizado, prompt_usuario, prefixo_arquivo="resposta",
             avatar_clip=AVATAR_CLIP_PERGUNTA,  # NOVO
+            model="groq/compound-mini",  # NOVO: acesso a dados reais/atuais via busca embutida
         )
 
         base_url = request.host_url.rstrip("/")
@@ -382,4 +430,3 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-    
