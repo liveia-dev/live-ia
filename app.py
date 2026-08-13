@@ -20,6 +20,12 @@ VOICE_NAME = os.environ.get("VOICE_NAME", "pt-BR-AntonioNeural")  # troque para 
 MIN_SECONDS_BETWEEN_ANSWERS = float(os.environ.get("MIN_SECONDS_BETWEEN_ANSWERS", "8"))
 MIN_MESSAGE_LENGTH = int(os.environ.get("MIN_MESSAGE_LENGTH", "4"))
 
+# NOVO: conexão direta com a live da TikTok, rodando no próprio Render — dispensa
+# TikFinity/Streamer.bot rodando no seu PC. Ver bloco "listener da TikTok" no fim do arquivo.
+TIKTOK_USERNAME = os.environ.get("TIKTOK_USERNAME", "").strip().lstrip("@")
+TIKTOK_SIGN_API_KEY = os.environ.get("TIKTOK_SIGN_API_KEY", "").strip()  # opcional, chave da Euler Stream
+INICIAR_LISTENER_TIKTOK = os.environ.get("INICIAR_LISTENER_TIKTOK", "true").strip().lower() == "true"
+
 # Ajuste fino de pitch/rate da voz PRINCIPAL (a que responde perguntas no /ask),
 # pra soar mais pausada e envolvente em vez do padrão "neutro" da Thalita.
 # Dá pra testar outros valores direto no Render (env vars), sem mexer no código.
@@ -278,18 +284,17 @@ def gerar_resposta_e_falar(system_prompt: str, prompt_usuario: str, prefixo_arqu
     return resposta_texto, nome_arquivo
 
 
-@app.route("/ask", methods=["POST"])
-def ask():
+def processar_pergunta(username: str, message: str) -> dict:
+    """Toda a lógica de tratar uma pergunta do chat: filtro, rate limit, IA e fila de áudio.
+    Usada tanto pelo endpoint /ask (webhook do TikFinity/Streamer.bot) quanto pelo
+    listener direto da TikTok (NOVO) — assim a lógica não fica duplicada."""
     global _last_answer_time
 
-    data = request.get_json(force=True, silent=True) or {}
-
-    # Aceita tanto o formato do TikFinity (value1/value2) quanto o nosso formato de teste (username/message)
-    username = str(data.get("value1", data.get("username", ""))).strip()
-    message = str(data.get("value2", data.get("message", ""))).strip()
+    username = (username or "").strip()
+    message = (message or "").strip()
 
     if len(message) < MIN_MESSAGE_LENGTH:
-        return jsonify({"skipped": True, "reason": "message_too_short"}), 200
+        return {"skipped": True, "reason": "message_too_short"}
 
     mensagem_lower = message.lower().strip()
     parece_pergunta = "?" in message
@@ -297,61 +302,74 @@ def ask():
     parece_pedido_explicacao = any(expressao in mensagem_lower for expressao in PALAVRAS_DE_PERGUNTA)
 
     if not (parece_pergunta or usou_comando or parece_pedido_explicacao):
-        return jsonify({"skipped": True, "reason": "not_a_question"}), 200
+        return {"skipped": True, "reason": "not_a_question"}
 
     if usou_comando:
         # remove o "!pergunta" do começo, deixando só o texto da dúvida
         message = message[len("!pergunta"):].strip(" :,-")
         if len(message) < MIN_MESSAGE_LENGTH:
-            return jsonify({"skipped": True, "reason": "message_too_short"}), 200
+            return {"skipped": True, "reason": "message_too_short"}
 
     with _lock:
         now = time.time()
         if now - _last_answer_time < MIN_SECONDS_BETWEEN_ANSWERS:
-            return jsonify({"skipped": True, "reason": "rate_limited"}), 200
+            return {"skipped": True, "reason": "rate_limited"}
         _last_answer_time = now
 
     try:
         prompt_usuario = message if not username else f"{username} perguntou: {message}"
 
-        # NOVO: injeta a data/hora reais no prompt (resolve perguntas tipo "que dia é hoje")
+        # injeta a data/hora reais no prompt (resolve perguntas tipo "que dia é hoje")
         # e usa o groq/compound-mini, que tem busca na web embutida e aciona sozinho
         # quando a pergunta precisa de informação atual (notícia, resultado de jogo, etc.)
         system_prompt_atualizado = f"{SYSTEM_PROMPT} {obter_contexto_data_hora()}"
         resposta_texto, nome_arquivo = gerar_resposta_e_falar(
             system_prompt_atualizado, prompt_usuario, prefixo_arquivo="resposta",
-            avatar_clip=AVATAR_CLIP_PERGUNTA,  # NOVO
-            model="groq/compound-mini",  # NOVO: acesso a dados reais/atuais via busca embutida
-            pitch=PITCH_PRINCIPAL, rate=RATE_PRINCIPAL,  # NOVO: tom mais pausado/envolvente
+            avatar_clip=AVATAR_CLIP_PERGUNTA,
+            model="groq/compound-mini",  # acesso a dados reais/atuais via busca embutida
+            pitch=PITCH_PRINCIPAL, rate=RATE_PRINCIPAL,  # tom mais pausado/envolvente
         )
 
-        base_url = request.host_url.rstrip("/")
-        audio_url = f"{base_url}/static/audio/{nome_arquivo}"
-
-        return jsonify({
+        return {
             "skipped": False,
             "text": resposta_texto,
-            "audio_url": audio_url,
             "filename": nome_arquivo,
-            "avatar_clip": AVATAR_CLIP_PERGUNTA,  # NOVO
-        })
+            "avatar_clip": AVATAR_CLIP_PERGUNTA,
+        }
 
     except Exception as e:
-        return jsonify({"skipped": True, "reason": "error", "detail": str(e)}), 500
+        return {"skipped": True, "reason": "error", "detail": str(e)}
 
 
-@app.route("/gift", methods=["POST"])
-def gift():
-    global _last_gift_time
-
+@app.route("/ask", methods=["POST"])
+def ask():
     data = request.get_json(force=True, silent=True) or {}
 
-    # value1 = username, value3 = nome do presente (SKU), conforme o webhook do TikFinity
-    username = str(data.get("value1", data.get("username", "alguém"))).strip() or "alguém"
-    gift_name = str(data.get("value3", data.get("gift", ""))).strip() or "um presente"
+    # Aceita tanto o formato do TikFinity (value1/value2) quanto o nosso formato de teste (username/message)
+    username = str(data.get("value1", data.get("username", ""))).strip()
+    message = str(data.get("value2", data.get("message", ""))).strip()
+
+    resultado = processar_pergunta(username, message)
+
+    if not resultado.get("skipped") and "filename" in resultado:
+        base_url = request.host_url.rstrip("/")
+        resultado["audio_url"] = f"{base_url}/static/audio/{resultado['filename']}"
+
+    status = 500 if resultado.get("reason") == "error" else 200
+    return jsonify(resultado), status
+
+
+def processar_presente(username: str, gift_name: str) -> dict:
+    """Toda a lógica de reagir a um presente: classificação por tier, rate limit,
+    modo IA/NPC, escalada de voz fina->grave e fila de áudio. Usada pelo /gift
+    (webhook) e pelo listener direto da TikTok (NOVO)."""
+    global _last_gift_time
+
+    username = (username or "alguém").strip() or "alguém"
+    gift_name = (gift_name or "um presente").strip() or "um presente"
 
     tier = classificar_presente(gift_name)
-    avatar_clip = TIER_TO_AVATAR_CLIP.get(tier, TIER_TO_AVATAR_CLIP["barato"])  # NOVO
+    avatar_clip = TIER_TO_AVATAR_CLIP.get(tier, TIER_TO_AVATAR_CLIP["barato"])
     vai_usar_ia = (GIFT_MODE != "npc") or (tier == "caro")
 
     # Presentes caros (que usam IA) respeitam o cooldown mais longo, mesmo em modo NPC.
@@ -362,7 +380,7 @@ def gift():
         with _lock:
             now = time.time()
             if now - _last_gift_time < cooldown:
-                return jsonify({"skipped": True, "reason": "rate_limited"}), 200
+                return {"skipped": True, "reason": "rate_limited"}
             _last_gift_time = now
 
     try:
@@ -375,7 +393,7 @@ def gift():
 
             nome_arquivo = f"presente_{int(time.time() * 1000)}.mp3"
             caminho_completo = os.path.join(AUDIO_DIR, nome_arquivo)
-            voz, pitch_presente, rate_presente = voz_para_presente(tier)  # NOVO: escalada fina->grave
+            voz, pitch_presente, rate_presente = voz_para_presente(tier)  # escalada fina->grave
             gerar_audio(
                 resposta_texto,
                 caminho_completo,
@@ -383,9 +401,9 @@ def gift():
                 pitch=pitch_presente,
                 rate=rate_presente,
             )
-            colocou_na_fila = enfileirar(resposta_texto, nome_arquivo, avatar_clip=avatar_clip)  # NOVO
+            colocou_na_fila = enfileirar(resposta_texto, nome_arquivo, avatar_clip=avatar_clip)
             if not colocou_na_fila:
-                return jsonify({"skipped": True, "reason": "queue_full"}), 200
+                return {"skipped": True, "reason": "queue_full"}
 
         else:
             # Modo IA, ou presente CARO mesmo estando em modo NPC: reação especial e elaborada
@@ -398,7 +416,7 @@ def gift():
             else:
                 prompt_usuario = f"{username} acabou de mandar o presente '{gift_name}'."
 
-            voz, pitch_presente, rate_presente = voz_para_presente(tier)  # NOVO: escalada fina->grave
+            voz, pitch_presente, rate_presente = voz_para_presente(tier)  # escalada fina->grave
             resposta_texto, nome_arquivo = gerar_resposta_e_falar(
                 GIFT_SYSTEM_PROMPT,
                 prompt_usuario,
@@ -406,24 +424,38 @@ def gift():
                 voice=voz,
                 pitch=pitch_presente,
                 rate=rate_presente,
-                avatar_clip=avatar_clip,  # NOVO
+                avatar_clip=avatar_clip,
             )
 
-        base_url = request.host_url.rstrip("/")
-        audio_url = f"{base_url}/static/audio/{nome_arquivo}"
-
-        return jsonify({
+        return {
             "skipped": False,
             "mode": GIFT_MODE,
             "text": resposta_texto,
-            "audio_url": audio_url,
             "filename": nome_arquivo,
-            "tier": tier,  # NOVO — útil pra debug/teste
-            "avatar_clip": avatar_clip,  # NOVO
-        })
+            "tier": tier,
+            "avatar_clip": avatar_clip,
+        }
 
     except Exception as e:
-        return jsonify({"skipped": True, "reason": "error", "detail": str(e)}), 500
+        return {"skipped": True, "reason": "error", "detail": str(e)}
+
+
+@app.route("/gift", methods=["POST"])
+def gift():
+    data = request.get_json(force=True, silent=True) or {}
+
+    # value1 = username, value3 = nome do presente (SKU), conforme o webhook do TikFinity
+    username = str(data.get("value1", data.get("username", "alguém"))).strip() or "alguém"
+    gift_name = str(data.get("value3", data.get("gift", ""))).strip() or "um presente"
+
+    resultado = processar_presente(username, gift_name)
+
+    if not resultado.get("skipped") and "filename" in resultado:
+        base_url = request.host_url.rstrip("/")
+        resultado["audio_url"] = f"{base_url}/static/audio/{resultado['filename']}"
+
+    status = 500 if resultado.get("reason") == "error" else 200
+    return jsonify(resultado), status
 
 
 @app.route("/falar", methods=["POST"])
@@ -621,6 +653,80 @@ def player():
 @app.route("/")
 def home():
     return "Servidor da IA da live está no ar. Use /player como Browser Source no OBS."
+
+
+# ---------------------------------------------------------------------------
+# NOVO: listener direto da TikTok — conecta no chat/presentes da sua live
+# rodando aqui no Render, sem precisar de TikFinity ou Streamer.bot no seu PC.
+#
+# Usa a lib "TikTokLive" (não-oficial, engenharia reversa do protocolo interno
+# da TikTok). Requer só o seu @usuario, sem login/senha. Configure a variável
+# de ambiente TIKTOK_USERNAME no Render com o seu @ (sem o @).
+#
+# Opcional: TIKTOK_SIGN_API_KEY — chave gratuita da Euler Stream, serviço usado
+# por baixo dos panos pra "assinar" a conexão. Ajuda a evitar instabilidade em
+# uso mais pesado/contínuo. Sem ela, funciona no nível gratuito padrão.
+# ---------------------------------------------------------------------------
+
+def _iniciar_listener_tiktok():
+    if not TIKTOK_USERNAME:
+        print("[tiktok] TIKTOK_USERNAME não configurado — listener direto não vai iniciar. "
+              "Configure essa variável de ambiente no Render com o seu @ da TikTok.")
+        return
+
+    try:
+        from TikTokLive import TikTokLiveClient
+        from TikTokLive.client.web.web_settings import WebDefaults
+        from TikTokLive.events import ConnectEvent, DisconnectEvent, CommentEvent, GiftEvent
+    except ImportError:
+        print("[tiktok] biblioteca TikTokLive não instalada. Adicione 'TikTokLive' ao requirements.txt.")
+        return
+
+    # A chave da Euler Stream precisa ser configurada globalmente ANTES de criar
+    # o cliente — é assim que a lib TikTokLive espera receber essa configuração.
+    if TIKTOK_SIGN_API_KEY:
+        WebDefaults.tiktok_sign_api_key = TIKTOK_SIGN_API_KEY
+
+    def _rodar_cliente():
+        while True:
+            try:
+                client = TikTokLiveClient(unique_id=f"@{TIKTOK_USERNAME}")
+
+                @client.on(ConnectEvent)
+                async def _on_connect(_event):
+                    print(f"[tiktok] conectado à live de @{TIKTOK_USERNAME}")
+
+                @client.on(DisconnectEvent)
+                async def _on_disconnect(_event):
+                    print("[tiktok] desconectado da live")
+
+                @client.on(CommentEvent)
+                async def _on_comment(event):
+                    username = event.user.nickname or event.user.unique_id
+                    processar_pergunta(username, event.comment)
+
+                @client.on(GiftEvent)
+                async def _on_gift(event):
+                    # presentes "em combo" (ex: mandar 10 rosas seguidas) só devem
+                    # ser processados quando o combo termina, senão processa cada
+                    # unidade do combo separadamente
+                    if event.gift.streakable and event.streaking:
+                        return
+                    username = event.user.nickname or event.user.unique_id
+                    processar_presente(username, event.gift.name)
+
+                client.run()  # bloqueia essa thread até cair a conexão
+
+            except Exception as e:
+                print(f"[tiktok] listener caiu ({e}); tentando reconectar em 15s...")
+                time.sleep(15)
+
+    thread = threading.Thread(target=_rodar_cliente, daemon=True)
+    thread.start()
+
+
+if INICIAR_LISTENER_TIKTOK:
+    _iniciar_listener_tiktok()
 
 
 if __name__ == "__main__":
