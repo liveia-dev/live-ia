@@ -4,3 +4,4 @@ gunicorn==22.0.0
 groq==0.11.0
 httpx==0.27.2
 edge-tts==7.2.3
+TikTokLive>=6.0.1
