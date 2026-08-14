@@ -228,6 +228,32 @@ def remover_emojis(texto: str) -> str:
 AUDIO_DIR = os.path.join(os.path.dirname(__file__), "static", "audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
+# NOVO: limpeza automática dos mp3 gerados — antes ficavam acumulando pra
+# sempre em disco (e potencialmente pressionando a memória/instância do
+# Render numa live longa). Roda em background, apagando arquivos com mais
+# de LIMPAR_AUDIO_MAIS_VELHO_QUE_S de idade, a cada LIMPAR_AUDIO_INTERVALO_S.
+LIMPAR_AUDIO_MAIS_VELHO_QUE_S = int(os.environ.get("LIMPAR_AUDIO_MAIS_VELHO_QUE_S", "600"))  # 10 min
+LIMPAR_AUDIO_INTERVALO_S = int(os.environ.get("LIMPAR_AUDIO_INTERVALO_S", "300"))  # a cada 5 min
+
+
+def _limpar_audios_antigos_loop():
+    import glob
+    while True:
+        try:
+            agora = time.time()
+            for caminho in glob.glob(os.path.join(AUDIO_DIR, "*.mp3")):
+                if agora - os.path.getmtime(caminho) > LIMPAR_AUDIO_MAIS_VELHO_QUE_S:
+                    try:
+                        os.remove(caminho)
+                    except OSError:
+                        pass
+        except Exception as e:
+            print(f"[limpeza] erro ao limpar áudios antigos: {e}")
+        time.sleep(LIMPAR_AUDIO_INTERVALO_S)
+
+
+threading.Thread(target=_limpar_audios_antigos_loop, daemon=True).start()
+
 # NOVO: pasta onde ficam os vídeos do avatar (idle, pergunta, presente_barato,
 # presente_medio, presente_caro, transicao). Coloque os arquivos .mp4 aqui,
 # com esses nomes exatos (ex: avatar_idle.mp4, avatar_pergunta.mp4...).
