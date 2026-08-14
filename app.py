@@ -19,6 +19,12 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 VOICE_NAME = os.environ.get("VOICE_NAME", "pt-BR-AntonioNeural")  # troque para pt-BR-FranciscaNeural se quiser voz feminina
 MIN_SECONDS_BETWEEN_ANSWERS = float(os.environ.get("MIN_SECONDS_BETWEEN_ANSWERS", "8"))
 MIN_MESSAGE_LENGTH = int(os.environ.get("MIN_MESSAGE_LENGTH", "4"))
+# NOVO: se "true", qualquer mensagem (que passe só pelo filtro de tamanho mínimo
+# acima) é tratada como pergunta válida — não exige mais "?", "!pergunta" nem
+# frases tipo "o que é"/"me explica". Deixa o chat bem mais "respondão", mas
+# cuidado: mensagens de chat comuns (elogios, "kkkk", saudações longas) também
+# vão passar a gerar resposta da IA.
+RESPONDER_QUALQUER_MENSAGEM = os.environ.get("RESPONDER_QUALQUER_MENSAGEM", "false").strip().lower() == "true"
 
 # NOVO: conexão direta com a live da TikTok, rodando no próprio Render — dispensa
 # TikFinity/Streamer.bot rodando no seu PC. Ver bloco "listener da TikTok" no fim do arquivo.
@@ -301,7 +307,9 @@ def processar_pergunta(username: str, message: str) -> dict:
     usou_comando = mensagem_lower.startswith("!pergunta")
     parece_pedido_explicacao = any(expressao in mensagem_lower for expressao in PALAVRAS_DE_PERGUNTA)
 
-    if not (parece_pergunta or usou_comando or parece_pedido_explicacao):
+    # NOVO: com RESPONDER_QUALQUER_MENSAGEM=true, pula esse filtro inteiro —
+    # qualquer mensagem que já passou do MIN_MESSAGE_LENGTH acima é respondida.
+    if not RESPONDER_QUALQUER_MENSAGEM and not (parece_pergunta or usou_comando or parece_pedido_explicacao):
         return {"skipped": True, "reason": "not_a_question"}
 
     if usou_comando:
