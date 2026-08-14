@@ -384,12 +384,16 @@ def processar_presente(username: str, gift_name: str) -> dict:
     # Presentes baratos/médios em modo NPC usam um cooldown bem curto, já que a fila cuida do resto.
     cooldown = MIN_SECONDS_BETWEEN_GIFTS if vai_usar_ia else MIN_SECONDS_BETWEEN_GIFTS_NPC
 
-    if vai_usar_ia:
-        with _lock:
-            now = time.time()
-            if now - _last_gift_time < cooldown:
-                return {"skipped": True, "reason": "rate_limited"}
-            _last_gift_time = now
+    # ANTES: esse cooldown só era checado dentro do "if vai_usar_ia:", então
+    # presentes baratos/médios (modo NPC) nunca tinham limite de velocidade
+    # nenhum — um combo de presentes rápidos inundava a fila sem controle.
+    # AGORA: o cooldown roda sempre, com o valor certo pra cada caso
+    # (mais curto pra NPC, mais longo pra IA).
+    with _lock:
+        now = time.time()
+        if now - _last_gift_time < cooldown:
+            return {"skipped": True, "reason": "rate_limited"}
+        _last_gift_time = now
 
     try:
         if not vai_usar_ia:
@@ -740,3 +744,4 @@ if INICIAR_LISTENER_TIKTOK:
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+    
